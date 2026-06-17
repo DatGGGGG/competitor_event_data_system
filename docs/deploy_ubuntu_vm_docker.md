@@ -136,6 +136,7 @@ Fill in:
 SENSOR_TOWER_AUTH_TOKEN=your_real_token
 SOCIALDATA_APP_SLUG=srcvn
 SOCIALDATA_GOOGLE_SERVICE_ACCOUNT_FILE=/app/secrets/socialdata-service-account.json
+SOCIALDATA_GOOGLE_SCOPES=https://www.googleapis.com/auth/userinfo.email
 OPENAI_API_KEY=your_real_key
 OPENAI_BASE_URL=https://compass.llm.shopee.io/compass-api/v1
 OPENAI_PROVIDER=OpenAI
@@ -148,6 +149,7 @@ SENSORTOWER_SYNC_LOOKBACK_DAYS=3
 Notes:
 
 - `SOCIALDATA_GOOGLE_SERVICE_ACCOUNT_FILE` is the best unattended auth path for weekly VM runs.
+- `SOCIALDATA_GOOGLE_SCOPES` should include `https://www.googleapis.com/auth/userinfo.email` so Socialdata can identify the granted service-account email.
 - `SOCIALDATA_USESSION` and `SOCIALDATA_GOOGLE_ACCESS_TOKEN` are optional manual fallbacks, but both expire.
 - `PIPELINE_UNIFIED_MONTHS` can stay blank. The VM pipeline script will then rebuild the previous month and current month automatically.
 

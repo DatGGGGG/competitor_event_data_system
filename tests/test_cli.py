@@ -162,6 +162,7 @@ class CliTests(unittest.TestCase):
         self.assertIsNone(args.usession)
         self.assertIsNone(args.google_access_token)
         self.assertIsNone(args.google_service_account_file)
+        self.assertIsNone(args.google_scope)
         self.assertIsNone(args.timeout_seconds)
 
     def test_socialdata_mint_google_access_token_parser_defaults(self) -> None:
@@ -170,9 +171,23 @@ class CliTests(unittest.TestCase):
         self.assertEqual(args.command, "socialdata-mint-google-access-token")
         self.assertIsNone(args.google_service_account_file)
         self.assertIsNone(args.socialdata_base_url)
+        self.assertIsNone(args.google_scope)
         self.assertIsNone(args.timeout_seconds)
         self.assertFalse(args.token_only)
         self.assertIsNone(args.output)
+
+    def test_socialdata_mint_google_access_token_parser_supports_scope_override(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "socialdata-mint-google-access-token",
+                "--google-scope",
+                "scope-a",
+                "--google-scope",
+                "scope-b",
+            ]
+        )
+        self.assertEqual(args.google_scope, ["scope-a", "scope-b"])
 
     def test_socialdata_debug_token_exchange_parser_defaults(self) -> None:
         parser = build_parser()
@@ -181,6 +196,7 @@ class CliTests(unittest.TestCase):
         self.assertIsNone(args.socialdata_base_url)
         self.assertIsNone(args.google_access_token)
         self.assertIsNone(args.google_service_account_file)
+        self.assertIsNone(args.google_scope)
         self.assertIsNone(args.timeout_seconds)
         self.assertIsNone(args.output)
 

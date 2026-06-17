@@ -19,3 +19,4 @@ reports/
 deploy/docker/vm.env
 local_secrets/*
 !local_secrets/README.md
+node_modules/

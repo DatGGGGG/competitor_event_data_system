@@ -1,0 +1,11 @@
+{
+  "name": "vn-competitor-event-data-system-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "socialdata:mint-node-token": "node scripts/socialdata_mint_google_access_token.mjs"
+  },
+  "dependencies": {
+    "google-auth-library": "^9.15.1"
+  }
+}

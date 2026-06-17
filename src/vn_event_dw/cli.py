@@ -241,6 +241,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     socialdata_auth_parser.add_argument(
+        "--google-scope",
+        action="append",
+        default=None,
+        help=(
+            "Optional Google OAuth scope for service-account token minting. Repeatable. "
+            "Defaults to SOCIALDATA_GOOGLE_SCOPES or https://www.googleapis.com/auth/userinfo.email."
+        ),
+    )
+    socialdata_auth_parser.add_argument(
         "--timeout-seconds",
         type=int,
         default=None,
@@ -263,6 +272,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--socialdata-base-url",
         default=None,
         help="Optional Socialdata base URL. Included for config consistency; not required to mint the token.",
+    )
+    socialdata_mint_token_parser.add_argument(
+        "--google-scope",
+        action="append",
+        default=None,
+        help=(
+            "Optional Google OAuth scope for service-account token minting. Repeatable. "
+            "Defaults to SOCIALDATA_GOOGLE_SCOPES or https://www.googleapis.com/auth/userinfo.email."
+        ),
     )
     socialdata_mint_token_parser.add_argument(
         "--timeout-seconds",
@@ -305,6 +323,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     socialdata_debug_exchange_parser.add_argument(
+        "--google-scope",
+        action="append",
+        default=None,
+        help=(
+            "Optional Google OAuth scope for service-account token minting. Repeatable. "
+            "Defaults to SOCIALDATA_GOOGLE_SCOPES or https://www.googleapis.com/auth/userinfo.email."
+        ),
+    )
+    socialdata_debug_exchange_parser.add_argument(
         "--timeout-seconds",
         type=int,
         default=None,
@@ -342,6 +369,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional Google service-account JSON credential file used to mint a short-lived access token "
             "for Socialdata auth. Falls back to SOCIALDATA_GOOGLE_SERVICE_ACCOUNT_FILE."
+        ),
+    )
+    socialdata_graphql_parser.add_argument(
+        "--google-scope",
+        action="append",
+        default=None,
+        help=(
+            "Optional Google OAuth scope for service-account token minting. Repeatable. "
+            "Defaults to SOCIALDATA_GOOGLE_SCOPES or https://www.googleapis.com/auth/userinfo.email."
         ),
     )
     socialdata_graphql_parser.add_argument(
@@ -400,6 +436,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional Google service-account JSON credential file used to mint a short-lived access token "
             "for Socialdata auth. Falls back to SOCIALDATA_GOOGLE_SERVICE_ACCOUNT_FILE."
+        ),
+    )
+    socialdata_introspect_parser.add_argument(
+        "--google-scope",
+        action="append",
+        default=None,
+        help=(
+            "Optional Google OAuth scope for service-account token minting. Repeatable. "
+            "Defaults to SOCIALDATA_GOOGLE_SCOPES or https://www.googleapis.com/auth/userinfo.email."
         ),
     )
     socialdata_introspect_parser.add_argument(
@@ -475,6 +520,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     socialdata_sync_parser.add_argument(
+        "--google-scope",
+        action="append",
+        default=None,
+        help=(
+            "Optional Google OAuth scope for service-account token minting. Repeatable. "
+            "Defaults to SOCIALDATA_GOOGLE_SCOPES or https://www.googleapis.com/auth/userinfo.email."
+        ),
+    )
+    socialdata_sync_parser.add_argument(
         "--timeout-seconds",
         type=int,
         default=None,
@@ -497,6 +551,7 @@ def _build_socialdata_client(args: argparse.Namespace) -> SocialDataClient:
         usession=getattr(args, "usession", None),
         google_access_token=getattr(args, "google_access_token", None),
         google_service_account_file=getattr(args, "google_service_account_file", None),
+        google_scopes=getattr(args, "google_scope", None),
         timeout_seconds=getattr(args, "timeout_seconds", None),
     )
 
@@ -865,6 +920,7 @@ def main() -> int:
                 "service_account_email": result.service_account_email,
                 "access_token": result.access_token,
                 "expiry_iso": result.expiry_iso,
+                "google_scopes": list(result.google_scopes),
             },
             output_path=args.output,
         )
@@ -877,6 +933,7 @@ def main() -> int:
             {
                 "token_source": result.token_source,
                 "service_account_email": result.service_account_email,
+                "google_scopes": list(result.google_scopes) if result.google_scopes is not None else None,
                 "access_token_length": result.access_token_length,
                 "access_token_prefix": result.access_token_prefix,
                 "access_token_suffix": result.access_token_suffix,

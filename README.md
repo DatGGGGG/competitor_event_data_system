@@ -52,6 +52,7 @@ Environment variables:
 - `SOCIALDATA_USESSION`
 - `SOCIALDATA_GOOGLE_ACCESS_TOKEN`
 - `SOCIALDATA_GOOGLE_SERVICE_ACCOUNT_FILE`
+- `SOCIALDATA_GOOGLE_SCOPES`
 - `SOCIALDATA_TIMEOUT_SECONDS`
 - `SOCIALDATA_APP_SLUG`
 
@@ -69,6 +70,8 @@ python -m vn_event_dw.cli sync-socialdata-posts --db data/warehouse.db --config 
 Notes:
 
 - `socialdata-mint-google-access-token` is useful when you want to follow the Socialdata manual callback steps yourself before involving the rest of the pipeline.
+- Service-account token minting defaults to `https://www.googleapis.com/auth/userinfo.email`, because Socialdata needs the Google token to expose the granted service-account email.
+- Use repeatable `--google-scope` or `SOCIALDATA_GOOGLE_SCOPES` only for debugging alternate Google token scopes.
 - Use `--token-only` when you want to paste the token directly into `curl` or another manual callback check.
 - `--usession` is the fastest way to test connectivity if you already have a cookie.
 - If you do not have a cookie, the commands can also exchange a Google access token through `--google-access-token` or `SOCIALDATA_GOOGLE_ACCESS_TOKEN`.

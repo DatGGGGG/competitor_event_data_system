@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import io
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib import error
 
 from vn_event_dw.socialdata import (
     SocialDataClient,
@@ -68,6 +70,63 @@ class SocialDataTests(unittest.TestCase):
         )
         with patch.object(client, "refresh_google_access_token_from_service_account", return_value="fresh-token"):
             self.assertEqual(client.resolve_google_access_token(), "fresh-token")
+
+    def test_mint_google_access_token_from_service_account_returns_structured_result(self) -> None:
+        client = SocialDataClient(
+            base_url="https://socialdata.garena.vn",
+            google_service_account_file="/tmp/socialdata.json",
+        )
+        fake_result = object()
+        fake_credentials = type(
+            "FakeCredentials",
+            (),
+            {
+                "service_account_email": "socialdata-reader@example.com",
+                "token": "minted-token",
+                "expiry": None,
+                "refresh": lambda self, req: None,
+            },
+        )()
+        with patch("vn_event_dw.socialdata.Path.is_file", return_value=True), patch(
+            "google.oauth2.service_account.Credentials.from_service_account_file",
+            return_value=fake_credentials,
+        ), patch("google.auth.transport.requests.Request", return_value=fake_result):
+            result = client.mint_google_access_token_from_service_account()
+        self.assertEqual(result.service_account_email, "socialdata-reader@example.com")
+        self.assertEqual(result.access_token, "minted-token")
+        self.assertIsNone(result.expiry_iso)
+
+    def test_debug_google_token_exchange_reports_http_error_details(self) -> None:
+        client = SocialDataClient(base_url="https://socialdata.garena.vn", google_access_token="token123")
+
+        class _FakeHeaders:
+            def get_all(self, name: str):
+                if name.lower() == "set-cookie":
+                    return None
+                return None
+
+            def get(self, name: str):
+                return None
+
+        class _FakeOpener:
+            def open(self, req, timeout=60):
+                raise error.HTTPError(
+                    req.full_url,
+                    400,
+                    "Bad Request",
+                    _FakeHeaders(),
+                    io.BytesIO(b'{"message":"Invalid Email"}'),
+                )
+
+        with patch("vn_event_dw.socialdata.request.build_opener", return_value=_FakeOpener()):
+            result = client.debug_google_token_exchange()
+        self.assertEqual(result.token_source, "explicit_access_token")
+        self.assertEqual(result.access_token_length, 8)
+        self.assertEqual(result.access_token_prefix, "token123")
+        self.assertEqual(result.access_token_suffix, "token123")
+        self.assertEqual(result.http_status, 400)
+        self.assertEqual(result.response_body, '{"message":"Invalid Email"}')
+        self.assertIsNone(result.usession)
 
 
 if __name__ == "__main__":

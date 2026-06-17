@@ -58,6 +58,8 @@ Environment variables:
 CLI commands:
 
 ```bash
+python -m vn_event_dw.cli socialdata-mint-google-access-token --google-service-account-file /path/to/service-account.json
+python -m vn_event_dw.cli socialdata-mint-google-access-token --google-service-account-file /path/to/service-account.json --token-only
 python -m vn_event_dw.cli socialdata-auth-check --usession <cookie>
 python -m vn_event_dw.cli socialdata-graphql --query "query { __typename }" --usession <cookie>
 python -m vn_event_dw.cli socialdata-introspect --usession <cookie> --output tmp/socialdata_schema.json
@@ -66,6 +68,8 @@ python -m vn_event_dw.cli sync-socialdata-posts --db data/warehouse.db --config 
 
 Notes:
 
+- `socialdata-mint-google-access-token` is useful when you want to follow the Socialdata manual callback steps yourself before involving the rest of the pipeline.
+- Use `--token-only` when you want to paste the token directly into `curl` or another manual callback check.
 - `--usession` is the fastest way to test connectivity if you already have a cookie.
 - If you do not have a cookie, the commands can also exchange a Google access token through `--google-access-token` or `SOCIALDATA_GOOGLE_ACCESS_TOKEN`.
 - For unattended VM scheduling, prefer `SOCIALDATA_GOOGLE_SERVICE_ACCOUNT_FILE` so the client can mint a fresh Google access token on each run.

@@ -142,6 +142,28 @@ class SocialDataAuthResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SocialDataGoogleAccessTokenResult:
+    service_account_email: str
+    access_token: str
+    expiry_iso: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SocialDataGoogleTokenExchangeDebugResult:
+    token_source: str
+    service_account_email: str | None
+    access_token_length: int
+    access_token_prefix: str
+    access_token_suffix: str
+    exchange_endpoint: str
+    http_status: int
+    response_body: str | None
+    set_cookie_headers: tuple[str, ...]
+    location: str | None
+    usession: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class SocialDataConfig:
     base_url: str
     graphql_url: str
@@ -244,6 +266,14 @@ def parse_usession_from_set_cookie(set_cookie_headers: list[str] | tuple[str, ..
     raise RuntimeError("Socialdata auth response did not include a usession cookie.")
 
 
+def _token_prefix(token: str, *, width: int = 16) -> str:
+    return token[:width]
+
+
+def _token_suffix(token: str, *, width: int = 16) -> str:
+    return token[-width:] if len(token) > width else token
+
+
 class _NoRedirectHandler(request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
         return None
@@ -280,6 +310,9 @@ class SocialDataClient:
         )
 
     def refresh_google_access_token_from_service_account(self) -> str:
+        return self.mint_google_access_token_from_service_account().access_token
+
+    def mint_google_access_token_from_service_account(self) -> SocialDataGoogleAccessTokenResult:
         service_account_file = self.config.google_service_account_file
         if not service_account_file:
             raise RuntimeError(
@@ -310,13 +343,78 @@ class SocialDataClient:
             raise RuntimeError(
                 "Google service-account authentication completed, but no access token was returned."
             )
-        return token
+        expiry_iso = credentials.expiry.isoformat() if credentials.expiry is not None else None
+        return SocialDataGoogleAccessTokenResult(
+            service_account_email=str(credentials.service_account_email),
+            access_token=token,
+            expiry_iso=expiry_iso,
+        )
 
     def resolve_google_access_token(self, access_token: str | None = None) -> str:
         token = _normalize_text(access_token) or self.config.google_access_token
         if token:
             return token
         return self.refresh_google_access_token_from_service_account()
+
+    def debug_google_token_exchange(
+        self,
+        access_token: str | None = None,
+    ) -> SocialDataGoogleTokenExchangeDebugResult:
+        explicit_token = _normalize_text(access_token) or self.config.google_access_token
+        service_account_email: str | None = None
+        token_source = "explicit_access_token"
+        if explicit_token:
+            token = explicit_token
+        else:
+            minted = self.mint_google_access_token_from_service_account()
+            token = minted.access_token
+            service_account_email = minted.service_account_email
+            token_source = "service_account_file"
+
+        exchange_endpoint = f"{self.config.base_url}/connect/google/callback"
+        exchange_url = f"{exchange_endpoint}?{parse.urlencode({'access_token': token})}"
+        req = request.Request(exchange_url, method="GET")
+        opener = request.build_opener(_NoRedirectHandler)
+
+        http_status = 0
+        response_body: str | None = None
+        set_cookie_headers: tuple[str, ...] = ()
+        location: str | None = None
+        try:
+            with opener.open(req, timeout=self.config.timeout_seconds) as response:
+                http_status = getattr(response, "status", 200)
+                set_cookie_headers = tuple(response.headers.get_all("Set-Cookie") or ())
+                location = response.headers.get("Location")
+                try:
+                    response_body = response.read().decode("utf-8", errors="replace")
+                except Exception:
+                    response_body = None
+        except error.HTTPError as exc:
+            http_status = exc.code
+            response_body = exc.read().decode("utf-8", errors="replace")
+            set_cookie_headers = tuple(exc.headers.get_all("Set-Cookie") or ())
+            location = exc.headers.get("Location")
+        except error.URLError as exc:
+            response_body = str(exc.reason)
+
+        try:
+            usession = parse_usession_from_set_cookie(set_cookie_headers)
+        except RuntimeError:
+            usession = None
+
+        return SocialDataGoogleTokenExchangeDebugResult(
+            token_source=token_source,
+            service_account_email=service_account_email,
+            access_token_length=len(token),
+            access_token_prefix=_token_prefix(token),
+            access_token_suffix=_token_suffix(token),
+            exchange_endpoint=exchange_endpoint,
+            http_status=http_status,
+            response_body=response_body,
+            set_cookie_headers=set_cookie_headers,
+            location=location,
+            usession=usession,
+        )
 
     def exchange_google_access_token(self, access_token: str | None = None) -> SocialDataAuthResult:
         token = self.resolve_google_access_token(access_token)

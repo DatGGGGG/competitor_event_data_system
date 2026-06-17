@@ -247,6 +247,76 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional request timeout. Defaults to SOCIALDATA_TIMEOUT_SECONDS or 60.",
     )
 
+    socialdata_mint_token_parser = subparsers.add_parser(
+        "socialdata-mint-google-access-token",
+        help="Mint a Google access token from a service-account JSON file for manual Socialdata auth debugging.",
+    )
+    socialdata_mint_token_parser.add_argument(
+        "--google-service-account-file",
+        default=None,
+        help=(
+            "Optional Google service-account JSON credential file used to mint the token. "
+            "Falls back to SOCIALDATA_GOOGLE_SERVICE_ACCOUNT_FILE."
+        ),
+    )
+    socialdata_mint_token_parser.add_argument(
+        "--socialdata-base-url",
+        default=None,
+        help="Optional Socialdata base URL. Included for config consistency; not required to mint the token.",
+    )
+    socialdata_mint_token_parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=None,
+        help="Optional request timeout. Defaults to SOCIALDATA_TIMEOUT_SECONDS or 60.",
+    )
+    socialdata_mint_token_parser.add_argument(
+        "--token-only",
+        action="store_true",
+        help="Print only the access token, with no JSON wrapper.",
+    )
+    socialdata_mint_token_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write the output.",
+    )
+
+    socialdata_debug_exchange_parser = subparsers.add_parser(
+        "socialdata-debug-token-exchange",
+        help="Mint or reuse a Google access token, call the Socialdata callback, and print explicit debug output.",
+    )
+    socialdata_debug_exchange_parser.add_argument(
+        "--socialdata-base-url",
+        default=None,
+        help="Optional Socialdata base URL. Defaults to SOCIALDATA_BASE_URL or https://socialdata.garena.vn.",
+    )
+    socialdata_debug_exchange_parser.add_argument(
+        "--google-access-token",
+        default=None,
+        help="Optional already-minted Google access token to reuse for the callback test.",
+    )
+    socialdata_debug_exchange_parser.add_argument(
+        "--google-service-account-file",
+        default=None,
+        help=(
+            "Optional Google service-account JSON credential file used to mint the token. "
+            "Falls back to SOCIALDATA_GOOGLE_SERVICE_ACCOUNT_FILE."
+        ),
+    )
+    socialdata_debug_exchange_parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=None,
+        help="Optional request timeout. Defaults to SOCIALDATA_TIMEOUT_SECONDS or 60.",
+    )
+    socialdata_debug_exchange_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional path to write the JSON response.",
+    )
+
     socialdata_graphql_parser = subparsers.add_parser(
         "socialdata-graphql",
         help="Run an arbitrary authenticated Socialdata GraphQL query.",
@@ -423,11 +493,11 @@ def _load_sensortower_token() -> str:
 
 def _build_socialdata_client(args: argparse.Namespace) -> SocialDataClient:
     return SocialDataClient(
-        base_url=args.socialdata_base_url,
-        usession=args.usession,
-        google_access_token=args.google_access_token,
-        google_service_account_file=args.google_service_account_file,
-        timeout_seconds=args.timeout_seconds,
+        base_url=getattr(args, "socialdata_base_url", None),
+        usession=getattr(args, "usession", None),
+        google_access_token=getattr(args, "google_access_token", None),
+        google_service_account_file=getattr(args, "google_service_account_file", None),
+        timeout_seconds=getattr(args, "timeout_seconds", None),
     )
 
 
@@ -778,6 +848,47 @@ def main() -> int:
         auth_check_response = client.auth_check()
         print("socialdata_auth_check_completed")
         _emit_json_output(auth_check_response)
+        return 0
+
+    if args.command == "socialdata-mint-google-access-token":
+        client = _build_socialdata_client(args)
+        result = client.mint_google_access_token_from_service_account()
+        if args.token_only:
+            if args.output is not None:
+                args.output.write_text(result.access_token + "\n", encoding="utf-8")
+                print(f"Wrote Google access token to {args.output}")
+                return 0
+            print(result.access_token)
+            return 0
+        _emit_json_output(
+            {
+                "service_account_email": result.service_account_email,
+                "access_token": result.access_token,
+                "expiry_iso": result.expiry_iso,
+            },
+            output_path=args.output,
+        )
+        return 0
+
+    if args.command == "socialdata-debug-token-exchange":
+        client = _build_socialdata_client(args)
+        result = client.debug_google_token_exchange(access_token=args.google_access_token)
+        _emit_json_output(
+            {
+                "token_source": result.token_source,
+                "service_account_email": result.service_account_email,
+                "access_token_length": result.access_token_length,
+                "access_token_prefix": result.access_token_prefix,
+                "access_token_suffix": result.access_token_suffix,
+                "exchange_endpoint": result.exchange_endpoint,
+                "http_status": result.http_status,
+                "response_body": result.response_body,
+                "set_cookie_headers": list(result.set_cookie_headers),
+                "location": result.location,
+                "usession": result.usession,
+            },
+            output_path=args.output,
+        )
         return 0
 
     if args.command == "socialdata-graphql":

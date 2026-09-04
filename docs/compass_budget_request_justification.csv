@@ -1,0 +1,32 @@
+section,metric,value,unit,calculation_or_basis,notes
+Request,Requested monthly Compass budget,180,USD,Requested operating budget,Applies to the Event module
+Request,Current observed monthly cost range,100-110,USD,Recent operating experience,Current baseline before future growth
+Request,Monthly contingency buffer,70-80,USD,180 minus current observed monthly cost,For onboarding retries and normal volume variation
+Model pricing,gpt-5.6-luna input price,0.20,USD per 1M tokens,Compass OpenAI API proxy pricing,Used for FB post event detection
+Model pricing,gpt-5.6-luna cached input price,0.02,USD per 1M tokens,Compass OpenAI API proxy pricing,Used when cache applies
+Model pricing,gpt-5.6-luna output price,1.20,USD per 1M tokens,Compass OpenAI API proxy pricing,Used for FB post event detection
+Model pricing,gpt-5.6-terra input price,2.00,USD per 1M tokens,Compass OpenAI API proxy pricing,Used for unified event merge harvest and consolidation
+Model pricing,gpt-5.6-terra cached input price,0.20,USD per 1M tokens,Compass OpenAI API proxy pricing,Used when cache applies
+Model pricing,gpt-5.6-terra output price,12.00,USD per 1M tokens,Compass OpenAI API proxy pricing,Used for unified event merge harvest and consolidation
+Reference workload,FB posts processed,4002,posts,Successful August full-month workload,Approximately 19 tracked games
+Reference workload,Unified source rows processed,2038,source rows,Successful August full-month workload,FB and SensorTower-derived source rows
+Reference workload,Luna input tokens,3136172,tokens,Successful August full-month workload,FB post detection stage
+Reference workload,Luna output tokens,541257,tokens,Successful August full-month workload,FB post detection stage
+Reference workload,Luna estimated cost,1.28,USD,3.136172M x 0.20 plus 0.541257M x 1.20,FB post detection is high-call but low-cost
+Reference workload,Terra input tokens,6147391,tokens,Successful August full-month workload,Unified merge harvest and consolidation stages
+Reference workload,Terra cached input tokens,60928,tokens,Successful August full-month workload,Unified merge harvest and consolidation stages
+Reference workload,Terra output tokens,921424,tokens,Successful August full-month workload,Unified merge harvest and consolidation stages
+Reference workload,Terra estimated cost at current pricing,23.36,USD,6.147391M x 2.00 plus 0.060928M x 0.20 plus 0.921424M x 12.00,Terra is the primary cost driver
+Reference workload,Full-month reference total,24.64,USD,Luna cost plus Terra cost,Reference only and not the same as one scheduled weekly run
+Weekly forecast,Luna API calls,600-1100,calls,One request per newly detected or changed FB post,Expected weekly new-post volume
+Weekly forecast,Luna estimated cost,0.20-0.40,USD,Forecast from August token density,Low-cost classification layer
+Weekly forecast,Terra API calls,1000-2000,calls,Source chunk merges leftover post harvests and final consolidation,Varies with event density and unmerged FB posts
+Weekly forecast,Terra estimated cost,20-35,USD,Current plus previous month rebuilt each weekly run,Primary operational cost
+Weekly forecast,Total estimated cost,20-36,USD,Luna plus Terra,Normal run before unusual retries or onboarding
+Monthly forecast,Weekly pipeline runs,4-5,runs,Every Monday scheduled cron,Normal calendar month
+Monthly forecast,Weekly pipeline estimated cost,90-160,USD,Weekly estimate multiplied by 4-5,Planning range before contingency
+Monthly forecast,New game onboarding allowance,5-15,USD,One 30-day targeted backfill per added game,May be lower if games are retired or low-volume
+Monthly forecast,Retry and transient-error allowance,30-60,USD,Operational contingency,Includes occasional retries after provider errors
+Budget justification,Requested budget versus forecast,180,USD per month,Covers observed 100-110 USD baseline plus 70-80 USD buffer,Appropriate while game portfolio may also shrink
+Budget governance,Review threshold,145,USD per month,Review if actual monthly usage repeatedly exceeds this level,Allows action before exhausting the 180 USD budget
+Budget governance,Recommended review cadence,Every 2-3 months,,Compare llm_usage_log usage with the budget,Adjust for added or retired games

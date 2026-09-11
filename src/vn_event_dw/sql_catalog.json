@@ -2,28 +2,1851 @@
   "version": 1,
   "objects": {
     "config_app_mapping": {
-      "description": "Configured tracked-game mappings between names, sources, and unified app IDs.",
-      "grain": "one tracked source mapping",
-      "columns": {"unified_app_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}},
-      "relationships": [],
-      "examples": [{"question": "List tracked game mappings", "sql": "SELECT * FROM config_app_mapping LIMIT 20"}, {"question": "Find mappings for one unified app", "sql": "SELECT * FROM config_app_mapping WHERE unified_app_id = 'YOUR_UNIFIED_APP_ID' LIMIT 20"}]
+      "description": "Configuration mapping that assigns each tracked Facebook page to a canonical game identifier.",
+      "grain": "One active or historical game-to-Facebook-page mapping.",
+      "grain_columns": [
+        "unified_app_id",
+        "fb_page_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "unified_app_id": {
+          "description": "Stable internal identifier for the canonical tracked game.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "fb_page_id": {
+          "description": "Facebook page identifier associated with the source page.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "app_name": {
+          "description": "App name from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "is_active": {
+          "description": "Is active from the source or transformation pipeline.",
+          "semantic_type": "boolean",
+          "unit": "boolean",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "valid_from": {
+          "description": "Valid from from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "valid_to": {
+          "description": "Valid to from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_updated_at": {
+          "description": "Timestamp for source updated at; use as an ISO 8601 text value.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [
+        {
+          "from": "config_app_mapping",
+          "to": "raw_fb_posts",
+          "on": [
+            {
+              "from_column": "unified_app_id",
+              "to_column": "unified_app_id"
+            },
+            {
+              "from_column": "fb_page_id",
+              "to_column": "fb_page_id"
+            }
+          ],
+          "cardinality": "one_to_many",
+          "description": "One configured Facebook page can produce many raw Facebook posts."
+        }
+      ],
+      "examples": [
+        {
+          "question": "List active tracked Facebook pages.",
+          "sql": "SELECT unified_app_id, fb_page_id, app_name, valid_from, valid_to FROM config_app_mapping WHERE is_active = 1 ORDER BY app_name, fb_page_id LIMIT 50"
+        },
+        {
+          "question": "Find all configured Facebook pages for one game.",
+          "sql": "SELECT unified_app_id, fb_page_id, app_name, is_active FROM config_app_mapping WHERE unified_app_id = 'YOUR_UNIFIED_APP_ID' ORDER BY fb_page_id"
+        }
+      ]
     },
     "raw_fb_posts": {
-      "description": "Raw Facebook source posts before event detection.",
-      "grain": "source_post_id",
-      "columns": {"source_post_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}, "post_time": {"semantic_type": "timestamp", "unit": "text", "additivity": "non_additive", "default_aggregation": "latest", "null_policy": "preserve"}},
-      "relationships": [{"from": "raw_fb_posts", "to": "post_event_detection", "on": [{"from_column": "source_post_id", "to_column": "post_id"}], "cardinality": "one_to_one"}],
-      "examples": [{"question": "Newest Facebook posts", "sql": "SELECT source_post_id, page_name, game_name, post_time FROM raw_fb_posts ORDER BY post_time DESC LIMIT 20"}, {"question": "Posts for one game", "sql": "SELECT source_post_id, page_name, post_time FROM raw_fb_posts WHERE game_name = 'YOUR_GAME_NAME' LIMIT 20"}]
+      "description": "One row per Facebook post collected from a tracked page. This is the authoritative source for actual Facebook publication time and post engagement metrics.",
+      "grain": "One Facebook source post, identified by source_post_id.",
+      "grain_columns": [
+        "source_post_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "source_post_id": {
+          "description": "Stable Facebook post identifier from the source system.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "unified_app_id": {
+          "description": "Stable internal identifier for the canonical tracked game.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "fb_page_id": {
+          "description": "Facebook page identifier associated with the source page.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "channel_id": {
+          "description": "Socialdata channel identifier that represents the Facebook page.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "channel_name": {
+          "description": "Socialdata display name of the source Facebook channel.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "post_type": {
+          "description": "Post type from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "post_description": {
+          "description": "Post description from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "duration": {
+          "description": "Duration from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "link": {
+          "description": "Direct URL of the Facebook post when supplied by the source.",
+          "semantic_type": "url",
+          "unit": "url",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "publish_time": {
+          "description": "Actual time when the Facebook post was published by the source page, in ISO 8601 UTC format.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "hashtag": {
+          "description": "Hashtag from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "engagement": {
+          "description": "Source Facebook engagement count, stored as text by the landing schema. Cast to INTEGER before aggregation.",
+          "semantic_type": "integer",
+          "unit": "count",
+          "additivity": "additive",
+          "default_aggregation": "sum",
+          "null_policy": "zero",
+          "analyst_visible": true
+        },
+        "reaction": {
+          "description": "Source Facebook reaction count, stored as text by the landing schema. Cast to INTEGER before aggregation.",
+          "semantic_type": "integer",
+          "unit": "count",
+          "additivity": "additive",
+          "default_aggregation": "sum",
+          "null_policy": "zero",
+          "analyst_visible": true
+        },
+        "comment": {
+          "description": "Source Facebook comment count, stored as text by the landing schema. Cast to INTEGER before aggregation.",
+          "semantic_type": "integer",
+          "unit": "count",
+          "additivity": "additive",
+          "default_aggregation": "sum",
+          "null_policy": "zero",
+          "analyst_visible": true
+        },
+        "share": {
+          "description": "Source Facebook share count, stored as text by the landing schema. Cast to INTEGER before aggregation.",
+          "semantic_type": "integer",
+          "unit": "count",
+          "additivity": "additive",
+          "default_aggregation": "sum",
+          "null_policy": "zero",
+          "analyst_visible": true
+        },
+        "view": {
+          "description": "Source Facebook view count, stored as text by the landing schema. Cast to INTEGER before aggregation.",
+          "semantic_type": "integer",
+          "unit": "count",
+          "additivity": "additive",
+          "default_aggregation": "sum",
+          "null_policy": "zero",
+          "analyst_visible": true
+        },
+        "source_file": {
+          "description": "Raw supplier payload or ingestion field for source file; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "ingested_at": {
+          "description": "Time when this row was ingested into the warehouse, in ISO 8601 UTC format.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [
+        {
+          "from": "raw_fb_posts",
+          "to": "post_event_detection",
+          "on": [
+            {
+              "from_column": "source_post_id",
+              "to_column": "post_id"
+            }
+          ],
+          "cardinality": "one_to_one",
+          "description": "Each collected Facebook post has at most one event-detection result."
+        }
+      ],
+      "examples": [
+        {
+          "question": "List the latest Facebook posts across tracked games.",
+          "sql": "SELECT source_post_id, unified_app_id, channel_name, publish_time, CAST(NULLIF(reaction, '') AS INTEGER) AS reaction_count, CAST(NULLIF(comment, '') AS INTEGER) AS comment_count, CAST(NULLIF(share, '') AS INTEGER) AS share_count, CAST(NULLIF(view, '') AS INTEGER) AS view_count, link FROM raw_fb_posts ORDER BY publish_time DESC LIMIT 20"
+        },
+        {
+          "question": "Count actual Facebook posts by publication month for one game.",
+          "sql": "SELECT substr(publish_time, 1, 7) AS publish_month, COUNT(*) AS post_count FROM raw_fb_posts WHERE unified_app_id = 'YOUR_UNIFIED_APP_ID' GROUP BY substr(publish_time, 1, 7) ORDER BY publish_month DESC"
+        }
+      ]
     },
-    "raw_st_app_update": {"description": "Raw SensorTower mobile app-update source records.", "grain": "source row", "columns": {}, "relationships": [], "examples": [{"question": "Recent app updates", "sql": "SELECT * FROM raw_st_app_update LIMIT 20"}, {"question": "Count app updates", "sql": "SELECT COUNT(*) AS update_count FROM raw_st_app_update"}]},
-    "raw_st_version": {"description": "Raw SensorTower version-history source records.", "grain": "source row", "columns": {}, "relationships": [], "examples": [{"question": "Recent version records", "sql": "SELECT * FROM raw_st_version LIMIT 20"}, {"question": "Count version records", "sql": "SELECT COUNT(*) AS version_count FROM raw_st_version"}]},
-    "st_app_update_events": {"description": "Events extracted from SensorTower app updates.", "grain": "st_update_event_id", "columns": {"unified_app_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}}, "relationships": [{"from": "st_app_update_events", "to": "unified_event_sources", "on": [{"from_column": "st_update_event_id", "to_column": "source_id"}], "cardinality": "many_to_one"}], "examples": [{"question": "Recent update events", "sql": "SELECT unified_app_id, event_name, estimated_start_date FROM st_app_update_events ORDER BY estimated_start_date DESC LIMIT 20"}, {"question": "Update events for one game", "sql": "SELECT * FROM st_app_update_events WHERE unified_app_id = 'YOUR_UNIFIED_APP_ID' LIMIT 20"}]},
-    "st_version_events": {"description": "Events extracted from SensorTower version history.", "grain": "st_version_event_id", "columns": {"unified_app_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}}, "relationships": [{"from": "st_version_events", "to": "unified_event_sources", "on": [{"from_column": "st_version_event_id", "to_column": "source_id"}], "cardinality": "many_to_one"}], "examples": [{"question": "Recent version events", "sql": "SELECT unified_app_id, event_name, estimated_start_date FROM st_version_events ORDER BY estimated_start_date DESC LIMIT 20"}, {"question": "Version events for one game", "sql": "SELECT * FROM st_version_events WHERE unified_app_id = 'YOUR_UNIFIED_APP_ID' LIMIT 20"}]},
-    "post_event_detection": {"description": "Facebook post event-detection results and confidence.", "grain": "post_id", "columns": {"post_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}, "unified_app_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}, "post_time": {"semantic_type": "timestamp", "unit": "text", "additivity": "non_additive", "default_aggregation": "latest", "null_policy": "preserve"}, "detection_confidence": {"semantic_type": "ratio", "unit": "percent", "additivity": "non_additive", "default_aggregation": "average", "null_policy": "exclude"}}, "relationships": [{"from": "post_event_detection", "to": "raw_fb_posts", "on": [{"from_column": "post_id", "to_column": "source_post_id"}], "cardinality": "one_to_one"}], "examples": [{"question": "High-confidence detected events", "sql": "SELECT post_id, game_name, post_time, detection_confidence FROM post_event_detection WHERE contains_event = 1 ORDER BY post_time DESC LIMIT 20"}, {"question": "Detected posts for one game", "sql": "SELECT * FROM post_event_detection WHERE unified_app_id = 'YOUR_UNIFIED_APP_ID' AND contains_event = 1 LIMIT 20"}]},
-    "post_event_objects": {"description": "Event objects extracted from source posts.", "grain": "event_object_id", "columns": {"event_object_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}, "post_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}}, "relationships": [{"from": "post_event_objects", "to": "post_event_detection", "on": [{"from_column": "post_id", "to_column": "post_id"}], "cardinality": "many_to_one"}], "examples": [{"question": "Extracted event objects", "sql": "SELECT event_object_id, game_name, event_name, estimated_start_date FROM post_event_objects ORDER BY post_time DESC LIMIT 20"}, {"question": "Event objects from one post", "sql": "SELECT * FROM post_event_objects WHERE post_id = 'YOUR_POST_ID' LIMIT 20"}]},
-    "unified_events": {"description": "Canonical merged competitor events.", "grain": "unified_event_id", "columns": {"unified_event_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}, "unified_app_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}, "estimated_start_date": {"semantic_type": "date", "unit": "text", "additivity": "non_additive", "default_aggregation": "latest", "null_policy": "preserve"}}, "relationships": [{"from": "unified_events", "to": "unified_event_sources", "on": [{"from_column": "unified_event_id", "to_column": "unified_event_id"}], "cardinality": "one_to_many"}], "examples": [{"question": "Newest unified events", "sql": "SELECT unified_event_id, unified_app_id, canonical_event_name, estimated_start_date FROM unified_events ORDER BY estimated_start_date DESC LIMIT 20"}, {"question": "Events for one game", "sql": "SELECT * FROM unified_events WHERE unified_app_id = 'YOUR_UNIFIED_APP_ID' ORDER BY estimated_start_date DESC LIMIT 20"}]},
-    "unified_event_sources": {"description": "Source lineage for each canonical competitor event.", "grain": "unified_event_id + source_type + source_id", "columns": {"unified_event_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}, "source_post_id": {"semantic_type": "identifier", "unit": "text", "additivity": "non_additive", "default_aggregation": "none", "null_policy": "preserve"}, "source_time": {"semantic_type": "timestamp", "unit": "text", "additivity": "non_additive", "default_aggregation": "latest", "null_policy": "preserve"}}, "relationships": [{"from": "unified_event_sources", "to": "unified_events", "on": [{"from_column": "unified_event_id", "to_column": "unified_event_id"}], "cardinality": "many_to_one"}], "examples": [{"question": "Facebook posts linked to unified events", "sql": "SELECT unified_event_id, source_post_id, source_time FROM unified_event_sources WHERE source_type = 'fb_post' ORDER BY source_time DESC LIMIT 20"}, {"question": "Sources for an event", "sql": "SELECT * FROM unified_event_sources WHERE unified_event_id = 'YOUR_UNIFIED_EVENT_ID' LIMIT 20"}]},
-    "pipeline_runs": {"description": "Event warehouse pipeline execution records.", "grain": "pipeline run", "columns": {}, "relationships": [], "examples": [{"question": "Latest pipeline runs", "sql": "SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT 20"}, {"question": "Failed pipeline runs", "sql": "SELECT * FROM pipeline_runs WHERE status = 'failed' LIMIT 20"}]},
-    "llm_usage": {"description": "LLM usage records for event pipeline work.", "grain": "usage record", "columns": {}, "relationships": [], "examples": [{"question": "Recent model usage", "sql": "SELECT * FROM llm_usage LIMIT 20"}, {"question": "Usage by model", "sql": "SELECT model, COUNT(*) AS usage_count FROM llm_usage GROUP BY model LIMIT 20"}]}
+    "raw_st_app_update": {
+      "description": "One raw SensorTower app-update-history record. It captures the source update and normalized descriptive fields before event extraction.",
+      "grain": "One SensorTower app-update record, identified by source_update_id.",
+      "grain_columns": [
+        "source_update_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "source_update_id": {
+          "description": "Source or internal identifier for source update.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "unified_app_id": {
+          "description": "Stable internal identifier for the canonical tracked game.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "os": {
+          "description": "Os from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "app_id": {
+          "description": "Source or internal identifier for app.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "country": {
+          "description": "Country from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "update_time": {
+          "description": "Timestamp for update time; use as an ISO 8601 text value.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "update_type": {
+          "description": "Update type from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "name": {
+          "description": "Name from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "subtitle": {
+          "description": "Subtitle from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "short_description": {
+          "description": "Short description from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "description_text": {
+          "description": "Description text from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "description_before_text": {
+          "description": "Description before text from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "description_after_text": {
+          "description": "Description after text from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "description_diff_html": {
+          "description": "Description diff html from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "version_before": {
+          "description": "Version before from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "version_after": {
+          "description": "Version after from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "version_summary": {
+          "description": "Version summary from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "events_json": {
+          "description": "JSON-encoded source field for events json.",
+          "semantic_type": "json",
+          "unit": "json",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "channel_raw": {
+          "description": "Raw supplier payload or ingestion field for channel raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "notes_raw": {
+          "description": "Raw supplier payload or ingestion field for notes raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "advisory_raw": {
+          "description": "Raw supplier payload or ingestion field for advisory raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "apple_watch_enabled_raw": {
+          "description": "Raw supplier payload or ingestion field for apple watch enabled raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "apple_watch_icon_raw": {
+          "description": "Raw supplier payload or ingestion field for apple watch icon raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "apple_watch_screenshot_raw": {
+          "description": "Raw supplier payload or ingestion field for apple watch screenshot raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "category_raw": {
+          "description": "Raw supplier payload or ingestion field for category raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "contains_ad_raw": {
+          "description": "Raw supplier payload or ingestion field for contains ad raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "content_rating_raw": {
+          "description": "Raw supplier payload or ingestion field for content rating raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "country_raw": {
+          "description": "Raw supplier payload or ingestion field for country raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "custom_product_pages_raw": {
+          "description": "Raw supplier payload or ingestion field for custom product pages raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "description_raw": {
+          "description": "Raw supplier payload or ingestion field for description raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "events_raw": {
+          "description": "Raw supplier payload or ingestion field for events raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "feature_graphic_raw": {
+          "description": "Raw supplier payload or ingestion field for feature graphic raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "featured_user_feedback_raw": {
+          "description": "Raw supplier payload or ingestion field for featured user feedback raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "file_size_raw": {
+          "description": "Raw supplier payload or ingestion field for file size raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "icon_raw": {
+          "description": "Raw supplier payload or ingestion field for icon raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "imessage_enabled_raw": {
+          "description": "Raw supplier payload or ingestion field for imessage enabled raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "imessage_icon_raw": {
+          "description": "Raw supplier payload or ingestion field for imessage icon raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "imessage_screenshot_raw": {
+          "description": "Raw supplier payload or ingestion field for imessage screenshot raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "install_range_raw": {
+          "description": "Raw supplier payload or ingestion field for install range raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "minimum_os_version_raw": {
+          "description": "Raw supplier payload or ingestion field for minimum os version raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "name_raw": {
+          "description": "Raw supplier payload or ingestion field for name raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "price_raw": {
+          "description": "Raw supplier payload or ingestion field for price raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "promo_text_raw": {
+          "description": "Raw supplier payload or ingestion field for promo text raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "publisher_id_raw": {
+          "description": "Raw supplier payload or ingestion field for publisher id raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "publisher_name_raw": {
+          "description": "Raw supplier payload or ingestion field for publisher name raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "related_app_raw": {
+          "description": "Raw supplier payload or ingestion field for related app raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "screenshot_raw": {
+          "description": "Raw supplier payload or ingestion field for screenshot raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "sdk_id_raw": {
+          "description": "Raw supplier payload or ingestion field for sdk id raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "short_description_raw": {
+          "description": "Raw supplier payload or ingestion field for short description raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "subtitle_raw": {
+          "description": "Raw supplier payload or ingestion field for subtitle raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "support_url_raw": {
+          "description": "Raw supplier payload or ingestion field for support url raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "supported_device_raw": {
+          "description": "Raw supplier payload or ingestion field for supported device raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "supported_language_raw": {
+          "description": "Raw supplier payload or ingestion field for supported language raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "top_in_app_purchase_raw": {
+          "description": "Raw supplier payload or ingestion field for top in app purchase raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "payload_unified_app_id_raw": {
+          "description": "Raw supplier payload or ingestion field for payload unified app id raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "version_raw": {
+          "description": "Raw supplier payload or ingestion field for version raw; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "raw_payload": {
+          "description": "Raw supplier payload or ingestion field for raw payload; hidden from analyst queries.",
+          "semantic_type": "json",
+          "unit": "json",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "update_payload": {
+          "description": "Raw supplier payload or ingestion field for update payload; hidden from analyst queries.",
+          "semantic_type": "json",
+          "unit": "json",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "source_file": {
+          "description": "Raw supplier payload or ingestion field for source file; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "ingested_at": {
+          "description": "Time when this row was ingested into the warehouse, in ISO 8601 UTC format.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [],
+      "examples": [
+        {
+          "question": "List latest normalized SensorTower app updates.",
+          "sql": "SELECT source_update_id, unified_app_id, os, app_id, country, update_time, update_type, name, version_before, version_after, ingested_at FROM raw_st_app_update ORDER BY update_time DESC LIMIT 20"
+        },
+        {
+          "question": "Count SensorTower app updates by game and operating system.",
+          "sql": "SELECT unified_app_id, os, COUNT(*) AS update_count FROM raw_st_app_update GROUP BY unified_app_id, os ORDER BY update_count DESC, unified_app_id LIMIT 50"
+        }
+      ]
+    },
+    "raw_st_version": {
+      "description": "One raw SensorTower version-history record. It is the source history for normalized version changes before event extraction.",
+      "grain": "One SensorTower version-history record, identified by source_version_id.",
+      "grain_columns": [
+        "source_version_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "source_version_id": {
+          "description": "Source or internal identifier for source version.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "unified_app_id": {
+          "description": "Stable internal identifier for the canonical tracked game.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "os": {
+          "description": "Os from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "app_id": {
+          "description": "Source or internal identifier for app.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "country": {
+          "description": "Country from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "version_time": {
+          "description": "Timestamp for version time; use as an ISO 8601 text value.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "version_name": {
+          "description": "Version name from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "before_version": {
+          "description": "Before version from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "after_version": {
+          "description": "After version from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "version_summary": {
+          "description": "Version summary from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "raw_payload": {
+          "description": "Raw supplier payload or ingestion field for raw payload; hidden from analyst queries.",
+          "semantic_type": "json",
+          "unit": "json",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "version_payload": {
+          "description": "Raw supplier payload or ingestion field for version payload; hidden from analyst queries.",
+          "semantic_type": "json",
+          "unit": "json",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "source_file": {
+          "description": "Raw supplier payload or ingestion field for source file; hidden from analyst queries.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": false
+        },
+        "ingested_at": {
+          "description": "Time when this row was ingested into the warehouse, in ISO 8601 UTC format.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [],
+      "examples": [
+        {
+          "question": "List latest SensorTower version-history records.",
+          "sql": "SELECT source_version_id, unified_app_id, os, app_id, country, version_time, before_version, after_version, version_name, ingested_at FROM raw_st_version ORDER BY version_time DESC LIMIT 20"
+        },
+        {
+          "question": "Count version-history records by game and operating system.",
+          "sql": "SELECT unified_app_id, os, COUNT(*) AS version_record_count FROM raw_st_version GROUP BY unified_app_id, os ORDER BY version_record_count DESC, unified_app_id LIMIT 50"
+        }
+      ]
+    },
+    "st_app_update_events": {
+      "description": "Candidate game events extracted from SensorTower app-update history. A source candidate can be linked to zero or more unified events through unified_event_sources.",
+      "grain": "One extracted SensorTower app-update event candidate, identified by st_update_event_id.",
+      "grain_columns": [
+        "st_update_event_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "st_update_event_id": {
+          "description": "Source or internal identifier for st update event.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "event_id": {
+          "description": "Source or internal identifier for event.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_row_id": {
+          "description": "Source or internal identifier for source row.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "unified_app_id": {
+          "description": "Stable internal identifier for the canonical tracked game.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "event_name": {
+          "description": "Event name extracted from the source record; not yet a canonical unified event name.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "estimated_start_date": {
+          "description": "Best available estimated event start date in YYYY-MM-DD format; may be null when unknown.",
+          "semantic_type": "date",
+          "unit": "YYYY-MM-DD",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "estimated_end_date": {
+          "description": "Best available estimated event end date in YYYY-MM-DD format; may be null when unknown.",
+          "semantic_type": "date",
+          "unit": "YYYY-MM-DD",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "event_description": {
+          "description": "Description extracted from a source candidate.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_refs": {
+          "description": "JSON-encoded source field for source refs.",
+          "semantic_type": "json",
+          "unit": "json",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [
+        {
+          "from": "st_app_update_events",
+          "to": "unified_event_sources",
+          "on": [
+            {
+              "from_column": "st_update_event_id",
+              "to_column": "source_id"
+            }
+          ],
+          "conditions": [
+            {
+              "table": "unified_event_sources",
+              "column": "source_type",
+              "operator": "eq",
+              "value": "st_app_update_event"
+            }
+          ],
+          "cardinality": "one_to_many",
+          "description": "One app-update event candidate can contribute to zero or more canonical events."
+        }
+      ],
+      "examples": [
+        {
+          "question": "List recently dated app-update event candidates.",
+          "sql": "SELECT st_update_event_id, unified_app_id, event_name, estimated_start_date, estimated_end_date, event_description FROM st_app_update_events ORDER BY estimated_start_date DESC LIMIT 20"
+        },
+        {
+          "question": "Count app-update event candidates by game.",
+          "sql": "SELECT unified_app_id, COUNT(*) AS event_candidate_count FROM st_app_update_events GROUP BY unified_app_id ORDER BY event_candidate_count DESC LIMIT 50"
+        }
+      ]
+    },
+    "st_version_events": {
+      "description": "Candidate game events extracted from SensorTower version history. A source candidate can be linked to zero or more unified events through unified_event_sources.",
+      "grain": "One extracted SensorTower version event candidate, identified by st_version_event_id.",
+      "grain_columns": [
+        "st_version_event_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "st_version_event_id": {
+          "description": "Source or internal identifier for st version event.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_row_id": {
+          "description": "Source or internal identifier for source row.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "unified_app_id": {
+          "description": "Stable internal identifier for the canonical tracked game.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "event_name": {
+          "description": "Event name extracted from the source record; not yet a canonical unified event name.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "estimated_start_date": {
+          "description": "Best available estimated event start date in YYYY-MM-DD format; may be null when unknown.",
+          "semantic_type": "date",
+          "unit": "YYYY-MM-DD",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "estimated_end_date": {
+          "description": "Best available estimated event end date in YYYY-MM-DD format; may be null when unknown.",
+          "semantic_type": "date",
+          "unit": "YYYY-MM-DD",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "event_description": {
+          "description": "Description extracted from a source candidate.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_refs": {
+          "description": "JSON-encoded source field for source refs.",
+          "semantic_type": "json",
+          "unit": "json",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [
+        {
+          "from": "st_version_events",
+          "to": "unified_event_sources",
+          "on": [
+            {
+              "from_column": "st_version_event_id",
+              "to_column": "source_id"
+            }
+          ],
+          "conditions": [
+            {
+              "table": "unified_event_sources",
+              "column": "source_type",
+              "operator": "eq",
+              "value": "st_version_event"
+            }
+          ],
+          "cardinality": "one_to_many",
+          "description": "One version-history event candidate can contribute to zero or more canonical events."
+        }
+      ],
+      "examples": [
+        {
+          "question": "List recently dated version-event candidates.",
+          "sql": "SELECT st_version_event_id, unified_app_id, event_name, estimated_start_date, estimated_end_date, event_description FROM st_version_events ORDER BY estimated_start_date DESC LIMIT 20"
+        },
+        {
+          "question": "Count version event candidates by game.",
+          "sql": "SELECT unified_app_id, COUNT(*) AS event_candidate_count FROM st_version_events GROUP BY unified_app_id ORDER BY event_candidate_count DESC LIMIT 50"
+        }
+      ]
+    },
+    "post_event_detection": {
+      "description": "One LLM classification result per Facebook post. It records whether a post appears to contain event information; it is not a canonical event table.",
+      "grain": "One Facebook post classification, identified by post_id.",
+      "grain_columns": [
+        "post_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "post_id": {
+          "description": "Facebook source post identifier used by the event-detection pipeline; equals raw_fb_posts.source_post_id.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "unified_app_id": {
+          "description": "Stable internal identifier for the canonical tracked game.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "fb_page_id": {
+          "description": "Facebook page identifier associated with the source page.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "channel_id": {
+          "description": "Socialdata channel identifier that represents the Facebook page.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "page_name": {
+          "description": "Page name from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "game_name": {
+          "description": "Game name from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "post_time": {
+          "description": "Actual time when the classified or extracted Facebook post was published, in ISO 8601 UTC format.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "contains_event": {
+          "description": "Whether the classifier judged the Facebook post to contain event information: 1=true, 0=false.",
+          "semantic_type": "boolean",
+          "unit": "boolean",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "detection_confidence": {
+          "description": "LLM event-detection confidence on a 0-to-1 scale.",
+          "semantic_type": "ratio",
+          "unit": "0_to_1",
+          "additivity": "non_additive",
+          "default_aggregation": "average",
+          "null_policy": "exclude",
+          "analyst_visible": true
+        },
+        "detection_reason": {
+          "description": "Detection reason from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "event_signals": {
+          "description": "Event signals from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "post_text_hash": {
+          "description": "Post text hash from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "llm_model": {
+          "description": "Llm model from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "prompt_version": {
+          "description": "Prompt version from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "processed_at": {
+          "description": "Timestamp for processed at; use as an ISO 8601 text value.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [
+        {
+          "from": "post_event_detection",
+          "to": "post_event_objects",
+          "on": [
+            {
+              "from_column": "post_id",
+              "to_column": "post_id"
+            }
+          ],
+          "cardinality": "one_to_many",
+          "description": "One detected Facebook post can produce zero or more extracted event objects."
+        }
+      ],
+      "examples": [
+        {
+          "question": "List the most recent Facebook posts classified as event-related.",
+          "sql": "SELECT post_id, unified_app_id, game_name, post_time, detection_confidence, detection_reason FROM post_event_detection WHERE contains_event = 1 ORDER BY post_time DESC LIMIT 20"
+        },
+        {
+          "question": "Summarize event-detection classification for one game.",
+          "sql": "SELECT contains_event, COUNT(*) AS post_count, AVG(detection_confidence) AS average_confidence FROM post_event_detection WHERE unified_app_id = 'YOUR_UNIFIED_APP_ID' GROUP BY contains_event ORDER BY contains_event DESC"
+        }
+      ]
+    },
+    "post_event_objects": {
+      "description": "One event object extracted from an event-related Facebook post. A post may produce multiple event objects before unified-event merging.",
+      "grain": "One extracted event object, identified by event_object_id.",
+      "grain_columns": [
+        "event_object_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "event_object_id": {
+          "description": "Source or internal identifier for event object.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "post_id": {
+          "description": "Facebook source post identifier used by the event-detection pipeline; equals raw_fb_posts.source_post_id.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "unified_app_id": {
+          "description": "Stable internal identifier for the canonical tracked game.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "fb_page_id": {
+          "description": "Facebook page identifier associated with the source page.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "page_name": {
+          "description": "Page name from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "game_name": {
+          "description": "Game name from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "post_time": {
+          "description": "Actual time when the classified or extracted Facebook post was published, in ISO 8601 UTC format.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "event_name": {
+          "description": "Event name extracted from the source record; not yet a canonical unified event name.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "estimated_start_date": {
+          "description": "Best available estimated event start date in YYYY-MM-DD format; may be null when unknown.",
+          "semantic_type": "date",
+          "unit": "YYYY-MM-DD",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "estimated_end_date": {
+          "description": "Best available estimated event end date in YYYY-MM-DD format; may be null when unknown.",
+          "semantic_type": "date",
+          "unit": "YYYY-MM-DD",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "event_description": {
+          "description": "Description extracted from a source candidate.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "evidence_text": {
+          "description": "Evidence text from the source or transformation pipeline.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "extraction_confidence": {
+          "description": "LLM event-object extraction confidence on a 0-to-1 scale.",
+          "semantic_type": "ratio",
+          "unit": "0_to_1",
+          "additivity": "non_additive",
+          "default_aggregation": "average",
+          "null_policy": "exclude",
+          "analyst_visible": true
+        },
+        "llm_model": {
+          "description": "Llm model from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "prompt_version": {
+          "description": "Prompt version from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "processed_at": {
+          "description": "Timestamp for processed at; use as an ISO 8601 text value.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [],
+      "examples": [
+        {
+          "question": "List recently extracted Facebook event objects.",
+          "sql": "SELECT event_object_id, post_id, unified_app_id, event_name, estimated_start_date, estimated_end_date, extraction_confidence FROM post_event_objects ORDER BY post_time DESC LIMIT 20"
+        },
+        {
+          "question": "Find extracted event objects from one Facebook post.",
+          "sql": "SELECT event_object_id, event_name, estimated_start_date, estimated_end_date, extraction_confidence FROM post_event_objects WHERE post_id = 'YOUR_SOURCE_POST_ID' ORDER BY event_object_id"
+        }
+      ]
+    },
+    "unified_events": {
+      "description": "Canonical event registry after merging Facebook and SensorTower candidate sources. month_bucket is a reporting bucket for the event record, not the actual publication month of linked Facebook posts.",
+      "grain": "One canonical event, identified by unified_event_id.",
+      "grain_columns": [
+        "unified_event_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "unified_event_id": {
+          "description": "Source or internal identifier for unified event.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "unified_app_id": {
+          "description": "Stable internal identifier for the canonical tracked game.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "month_bucket": {
+          "description": "Canonical event reporting month in YYYY-MM format. It is not a Facebook post publication date.",
+          "semantic_type": "month",
+          "unit": "YYYY-MM",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "canonical_event_name": {
+          "description": "Canonical name assigned after candidate-source merging.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "event_category": {
+          "description": "Business category assigned to the canonical event.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "estimated_start_date": {
+          "description": "Best available estimated event start date in YYYY-MM-DD format; may be null when unknown.",
+          "semantic_type": "date",
+          "unit": "YYYY-MM-DD",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "estimated_end_date": {
+          "description": "Best available estimated event end date in YYYY-MM-DD format; may be null when unknown.",
+          "semantic_type": "date",
+          "unit": "YYYY-MM-DD",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "canonical_event_description": {
+          "description": "Canonical description assigned after source merging.",
+          "semantic_type": "text",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "anchor_source_type": {
+          "description": "Anchor source type from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "merge_confidence": {
+          "description": "Confidence for merge confidence on a 0-to-1 scale.",
+          "semantic_type": "ratio",
+          "unit": "0_to_1",
+          "additivity": "non_additive",
+          "default_aggregation": "average",
+          "null_policy": "exclude",
+          "analyst_visible": true
+        },
+        "merge_model": {
+          "description": "Merge model from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "prompt_version": {
+          "description": "Prompt version from the source or transformation pipeline.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "created_at": {
+          "description": "Timestamp for created at; use as an ISO 8601 text value.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "updated_at": {
+          "description": "Timestamp for updated at; use as an ISO 8601 text value.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [
+        {
+          "from": "unified_events",
+          "to": "unified_event_sources",
+          "on": [
+            {
+              "from_column": "unified_event_id",
+              "to_column": "unified_event_id"
+            }
+          ],
+          "cardinality": "one_to_many",
+          "description": "One canonical event has one or more source-lineage rows when source evidence is available."
+        }
+      ],
+      "examples": [
+        {
+          "question": "List canonical events in one event reporting bucket.",
+          "sql": "SELECT unified_event_id, unified_app_id, month_bucket, canonical_event_name, event_category, estimated_start_date, estimated_end_date, merge_confidence FROM unified_events WHERE month_bucket = '2026-08' ORDER BY estimated_start_date DESC, canonical_event_name LIMIT 50"
+        },
+        {
+          "question": "Count canonical events by game and event reporting bucket.",
+          "sql": "SELECT unified_app_id, month_bucket, COUNT(*) AS event_count FROM unified_events GROUP BY unified_app_id, month_bucket ORDER BY month_bucket DESC, event_count DESC LIMIT 100"
+        }
+      ]
+    },
+    "unified_event_sources": {
+      "description": "Lineage table linking canonical events to their source candidates. source_id is polymorphic and must always be interpreted together with source_type; source_post_id is only populated for Facebook sources.",
+      "grain": "One canonical-event-to-source link, uniquely identified by unified_event_id, source_type, and source_id.",
+      "grain_columns": [
+        "unified_event_id",
+        "source_type",
+        "source_id"
+      ],
+      "analyst_visible": true,
+      "columns": {
+        "unified_event_id": {
+          "description": "Source or internal identifier for unified event.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_type": {
+          "description": "Source-table discriminator for source_id: fb_post, st_app_update_event, or st_version_event.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_id": {
+          "description": "Polymorphic source identifier. Interpret it with source_type before joining to a source table.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_time": {
+          "description": "Relevant timestamp carried from the linked source; its exact meaning depends on source_type.",
+          "semantic_type": "timestamp",
+          "unit": "ISO_8601_UTC",
+          "additivity": "non_additive",
+          "default_aggregation": "latest",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_post_id": {
+          "description": "Stable Facebook post identifier from the source system.",
+          "semantic_type": "identifier",
+          "unit": "text",
+          "additivity": "non_additive",
+          "default_aggregation": "none",
+          "null_policy": "preserve",
+          "analyst_visible": true
+        },
+        "source_confidence": {
+          "description": "Confidence assigned to this source-to-event link on a 0-to-1 scale.",
+          "semantic_type": "ratio",
+          "unit": "0_to_1",
+          "additivity": "non_additive",
+          "default_aggregation": "average",
+          "null_policy": "exclude",
+          "analyst_visible": true
+        }
+      },
+      "relationships": [
+        {
+          "from": "unified_event_sources",
+          "to": "raw_fb_posts",
+          "on": [
+            {
+              "from_column": "source_id",
+              "to_column": "source_post_id"
+            }
+          ],
+          "conditions": [
+            {
+              "table": "unified_event_sources",
+              "column": "source_type",
+              "operator": "eq",
+              "value": "fb_post"
+            }
+          ],
+          "cardinality": "many_to_one",
+          "description": "A Facebook lineage row links to its raw Facebook post only when source_type is fb_post."
+        },
+        {
+          "from": "unified_event_sources",
+          "to": "unified_events",
+          "on": [
+            {
+              "from_column": "unified_event_id",
+              "to_column": "unified_event_id"
+            }
+          ],
+          "cardinality": "many_to_one",
+          "description": "Every lineage row belongs to exactly one canonical event."
+        }
+      ],
+      "examples": [
+        {
+          "question": "List Facebook posts linked to canonical events.",
+          "sql": "SELECT unified_event_id, source_id, source_post_id, source_time, source_confidence FROM unified_event_sources WHERE source_type = 'fb_post' ORDER BY source_time DESC LIMIT 20"
+        },
+        {
+          "question": "List all source lineage for one canonical event.",
+          "sql": "SELECT source_type, source_id, source_post_id, source_time, source_confidence FROM unified_event_sources WHERE unified_event_id = 'YOUR_UNIFIED_EVENT_ID' ORDER BY source_type, source_time DESC"
+        }
+      ]
+    }
   }
 }

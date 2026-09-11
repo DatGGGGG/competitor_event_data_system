@@ -7,6 +7,13 @@ from vn_event_dw.cli import build_parser
 
 
 class CliTests(unittest.TestCase):
+    def test_validate_sql_catalog_parser_defaults(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["validate-sql-catalog", "--db", "data/warehouse.db"])
+        self.assertEqual(args.command, "validate-sql-catalog")
+        self.assertEqual(args.db, Path("data/warehouse.db"))
+        self.assertEqual(args.catalog.name, "sql_catalog.json")
+
     def test_sync_sensortower_raw_parser_defaults(self) -> None:
         parser = build_parser()
         args = parser.parse_args(["sync-sensortower-raw", "--config", "examples/config.json"])

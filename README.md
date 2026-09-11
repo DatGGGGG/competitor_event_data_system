@@ -33,6 +33,7 @@ Start here depending on your goal:
   - [Agent Instructions For API v2](./docs/api_v2_agent_instructions.md)
   - [Event Lookup API](./docs/api.md)
   - [Event Lookup API Technical Spec](./docs/api_technical_spec.md)
+  - [Event SQL Catalog Contract](./docs/sql_catalog.md)
 - Deployment:
   - [Ubuntu VM Deployment](./docs/deploy_ubuntu_vm.md)
   - [Ubuntu VM Deployment (Docker Compose)](./docs/deploy_ubuntu_vm_docker.md)

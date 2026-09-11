@@ -40,6 +40,7 @@ from .socialdata_sync import (
     socialdata_diagnostic_failures,
     sync_socialdata_posts,
 )
+from .sql_catalog import default_catalog_path, load_sql_catalog, validate_sql_catalog
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -219,6 +220,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     summary_parser = subparsers.add_parser("summary", help="Print warehouse table counts")
     summary_parser.add_argument("--db", required=True, type=Path, help="SQLite database path")
+
+    validate_catalog_parser = subparsers.add_parser(
+        "validate-sql-catalog",
+        help="Validate Event SQL catalog metadata against a SQLite warehouse.",
+    )
+    validate_catalog_parser.add_argument("--db", required=True, type=Path, help="SQLite database path")
+    validate_catalog_parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=default_catalog_path(),
+        help="Path to sql_catalog.json (default: packaged catalog).",
+    )
 
     api_key_generate_parser = subparsers.add_parser(
         "api-key-generate",
@@ -1024,6 +1037,24 @@ def main() -> int:
         summary = summarize_db(args.db)
         for table_name, count in summary.items():
             print(f"{table_name}: {count}")
+        return 0
+
+    if args.command == "validate-sql-catalog":
+        conn = open_connection(args.db)
+        try:
+            catalog = load_sql_catalog(args.catalog)
+            errors = validate_sql_catalog(catalog, conn)
+        finally:
+            conn.close()
+        if errors:
+            print("sql_catalog_invalid")
+            for item in errors:
+                print(f"- {item}")
+            return 1
+        print(
+            "sql_catalog_valid "
+            f"catalog={args.catalog} objects={len(catalog.objects)} version={catalog.version}"
+        )
         return 0
 
     if args.command == "api-key-generate":

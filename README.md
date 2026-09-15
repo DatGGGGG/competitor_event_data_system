@@ -57,6 +57,10 @@ The recommended production setup is:
 - unified-event build via Compass Gateway / OpenAI-compatible API
 - weekly scheduled refresh on the VM
 
+When enabled, the tracked-games admin UI is available at
+`/api/events/admin/games`, rather than `/admin/games`, because the latter is
+reserved for the centralized VN Market Data Portal.
+
 The current VM-side pipeline wrapper:
 
 - syncs Socialdata posts
@@ -227,7 +231,7 @@ sudo docker compose --env-file deploy/docker/vm.env -f deploy/docker/docker-comp
 Then open:
 
 ```text
-https://market-data.garena.vn/admin/games
+https://market-data.garena.vn/api/events/admin/games
 ```
 
 What the UI does after a game is applied:

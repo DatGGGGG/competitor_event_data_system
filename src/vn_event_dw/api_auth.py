@@ -14,6 +14,7 @@ API_KEY_ENV_VAR = "VN_EVENT_DW_API_KEY"
 API_KEYS_FILE_ENV_VAR = "VN_EVENT_DW_API_KEYS_FILE"
 API_KEY_HEADER = "X-API-Key"
 PUBLIC_API_PATHS = {"/api/v2/health", "/api/events/v2/health"}
+ADMIN_UI_PREFIX = "/api/events/admin"
 
 
 def api_key_from_env() -> str:
@@ -56,6 +57,10 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     """Protect public read APIs when an API key env setting is configured."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        # The operational admin UI has its own password session and lives in
+        # the Event namespace to avoid colliding with the central Portal.
+        if request.url.path.startswith(ADMIN_UI_PREFIX):
+            return await call_next(request)
         if not api_key_auth_enabled() or not request.url.path.startswith("/api/"):
             return await call_next(request)
         if request.url.path in PUBLIC_API_PATHS:

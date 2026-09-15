@@ -32,6 +32,10 @@ from .etl import open_connection
 
 
 ADMIN_COOKIE_NAME = "vn_event_dw_admin"
+# The shared market-data domain reserves /admin for the centralized Portal.
+# Keep this operational UI within the Event service namespace so the VM router
+# can forward it alongside the Event API.
+ADMIN_ROUTE_PREFIX = "/api/events/admin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +143,7 @@ def load_admin_settings(*, db_path: Path) -> AdminSettings:
 def create_admin_router(*, db_path: Path) -> APIRouter:
     settings = load_admin_settings(db_path=db_path)
     store = AdminJobStore(settings.job_dir)
-    router = APIRouter()
+    router = APIRouter(prefix=ADMIN_ROUTE_PREFIX)
 
     def require_admin(request_obj: Request) -> None:
         if not settings.enabled:
@@ -150,13 +154,13 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
         if not _valid_cookie(cookie_value, settings.password):
             raise HTTPException(status_code=401, detail="Admin login required.")
 
-    @router.get("/admin", response_class=HTMLResponse)
+    @router.get("", response_class=HTMLResponse)
     def admin_home(request_obj: Request) -> Response:
         if _is_authenticated(request_obj, settings.password):
-            return RedirectResponse("/admin/games", status_code=303)
+            return RedirectResponse(f"{ADMIN_ROUTE_PREFIX}/games", status_code=303)
         return _html_response(_render_login_page(settings=settings))
 
-    @router.post("/admin/login")
+    @router.post("/login")
     async def admin_login(request_obj: Request) -> Response:
         form = await _read_urlencoded_form(request_obj)
         if not settings.enabled:
@@ -165,7 +169,7 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
             return _html_response(_render_login_page(settings=settings, error="ADMIN_PASSWORD is not configured."), status_code=503)
         if not hmac.compare_digest(form.get("password", ""), settings.password):
             return _html_response(_render_login_page(settings=settings, error="Wrong password."), status_code=401)
-        response = RedirectResponse("/admin/games", status_code=303)
+        response = RedirectResponse(f"{ADMIN_ROUTE_PREFIX}/games", status_code=303)
         response.set_cookie(
             ADMIN_COOKIE_NAME,
             _cookie_value(settings.password),
@@ -175,13 +179,13 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
         )
         return response
 
-    @router.post("/admin/logout")
+    @router.post("/logout")
     def admin_logout() -> Response:
-        response = RedirectResponse("/admin", status_code=303)
+        response = RedirectResponse(ADMIN_ROUTE_PREFIX, status_code=303)
         response.delete_cookie(ADMIN_COOKIE_NAME)
         return response
 
-    @router.get("/admin/games", response_class=HTMLResponse)
+    @router.get("/games", response_class=HTMLResponse)
     def admin_games(request_obj: Request) -> Response:
         require_admin(request_obj)
         payload = load_config_payload(settings.config_path)
@@ -194,7 +198,7 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
                 latest_job = None
         return _html_response(_render_games_page(settings=settings, payload=payload, latest_job=latest_job))
 
-    @router.post("/admin/games/preview", response_class=HTMLResponse)
+    @router.post("/games/preview", response_class=HTMLResponse)
     async def admin_games_preview(request_obj: Request) -> Response:
         require_admin(request_obj)
         form = await _read_urlencoded_form(request_obj)
@@ -210,7 +214,7 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
             )
         return _html_response(_render_preview_page(settings=settings, preview=preview, form=form))
 
-    @router.post("/admin/games/apply")
+    @router.post("/games/apply")
     async def admin_games_apply(request_obj: Request) -> Response:
         require_admin(request_obj)
         form = await _read_urlencoded_form(request_obj)
@@ -239,9 +243,9 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
             daemon=True,
         )
         thread.start()
-        return RedirectResponse(f"/admin/jobs/{job_id}", status_code=303)
+        return RedirectResponse(f"{ADMIN_ROUTE_PREFIX}/jobs/{job_id}", status_code=303)
 
-    @router.get("/admin/jobs/{job_id}", response_class=HTMLResponse)
+    @router.get("/jobs/{job_id}", response_class=HTMLResponse)
     def admin_job(request_obj: Request, job_id: str) -> Response:
         require_admin(request_obj)
         try:
@@ -250,7 +254,7 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
             raise HTTPException(status_code=404, detail="Admin job not found.") from exc
         return _html_response(_render_job_page(job))
 
-    @router.post("/admin/jobs/{job_id}/resolve")
+    @router.post("/jobs/{job_id}/resolve")
     async def admin_job_resolve(request_obj: Request, job_id: str) -> Response:
         require_admin(request_obj)
         form = await _read_urlencoded_form(request_obj)
@@ -275,7 +279,7 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
                 "note": note,
             },
         )
-        return RedirectResponse(f"/admin/jobs/{job_id}", status_code=303)
+        return RedirectResponse(f"{ADMIN_ROUTE_PREFIX}/jobs/{job_id}", status_code=303)
 
     return router
 
@@ -649,7 +653,7 @@ def _render_login_page(*, settings: AdminSettings, error: str | None = None) -> 
           <p>Add tracked games without touching the VM terminal.</p>
           {status}
           {error_html}
-          <form method="post" action="/admin/login">
+          <form method="post" action="{ADMIN_ROUTE_PREFIX}/login">
             <label>Password</label>
             <input type="password" name="password" autofocus>
             <p><button type="submit">Log in</button></p>
@@ -680,7 +684,7 @@ def _render_games_page(
         else:
             status_label = status
         latest_html = (
-            f"<p>Latest job: <a class='button ghost' href='/admin/jobs/{html.escape(str(latest_job['job_id']))}'>"
+            f"<p>Latest job: <a class='button ghost' href='{ADMIN_ROUTE_PREFIX}/jobs/{html.escape(str(latest_job['job_id']))}'>"
             f"{html.escape(status_label)} - {html.escape(str(latest_job['title']))}</a></p>"
         )
     values = form or {}
@@ -692,12 +696,12 @@ def _render_games_page(
           <h1>Tracked Games</h1>
           <p>Config source: <code>{html.escape(str(settings.config_path))}</code></p>
           {latest_html}
-          <form method="post" action="/admin/logout"><button class="ghost" type="submit">Log out</button></form>
+          <form method="post" action="{ADMIN_ROUTE_PREFIX}/logout"><button class="ghost" type="submit">Log out</button></form>
         </section>
         <section class="card">
           <h2>Add New Game</h2>
           {error_html}
-          <form method="post" action="/admin/games/preview">
+          <form method="post" action="{ADMIN_ROUTE_PREFIX}/games/preview">
             <div class="grid">
               <div><label>Game name</label><input name="app_name" value="{html.escape(values.get('app_name', ''))}" required></div>
               <div><label>Facebook page ID</label><input name="fb_page_id" value="{html.escape(values.get('fb_page_id', ''))}" required></div>
@@ -737,10 +741,10 @@ def _render_preview_page(*, settings: AdminSettings, preview: Any, form: dict[st
           <h1>Preview Change</h1>
           <p>This will add <strong>{html.escape(preview.app_name)}</strong> and then run a targeted {settings.backfill_lookback_days}-day backfill.</p>
           <pre>{html.escape(preview_json)}</pre>
-          <form method="post" action="/admin/games/apply">
+          <form method="post" action="{ADMIN_ROUTE_PREFIX}/games/apply">
             {hidden}
             <button type="submit">Apply, Commit, Push, And Backfill</button>
-            <a class="button ghost" href="/admin/games">Cancel</a>
+            <a class="button ghost" href="{ADMIN_ROUTE_PREFIX}/games">Cancel</a>
           </form>
         </section>
         """,
@@ -761,7 +765,7 @@ def _render_job_page(job: dict[str, Any]) -> str:
     resolve_html = ""
     if job.get("status") == "failed":
         resolve_html = """
-          <form method="post" action="/admin/jobs/{job_id}/resolve">
+          <form method="post" action="{ADMIN_ROUTE_PREFIX}/jobs/{job_id}/resolve">
             <label>Manual resolution note</label>
             <input name="note" placeholder="Example: Finished targeted backfill manually from VM terminal.">
             <p><button type="submit">Mark Manually Resolved</button></p>
@@ -777,7 +781,7 @@ def _render_job_page(job: dict[str, Any]) -> str:
           <p>Created: {html.escape(str(job.get('created_at')))} | Started: {html.escape(str(job.get('started_at')))} | Finished: {html.escape(str(job.get('finished_at')))}</p>
           {resolution_html}
           {resolve_html}
-          <p><a class="button ghost" href="/admin/games">Back to games</a></p>
+          <p><a class="button ghost" href="{ADMIN_ROUTE_PREFIX}/games">Back to games</a></p>
         </section>
         <section class="card">
           <h2>Log</h2>

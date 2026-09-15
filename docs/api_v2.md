@@ -45,7 +45,9 @@ curl \
   "https://market-data.garena.vn/api/events/v2/games"
 ```
 
-Admin pages under `/admin/...` use the separate `ADMIN_PASSWORD` login flow.
+The tracked-games admin UI uses the separate `ADMIN_PASSWORD` login flow at
+`/api/events/admin/...`. This avoids the centralized Portal-owned `/admin/...`
+paths on `market-data.garena.vn`.
 
 ## Response Shape
 

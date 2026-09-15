@@ -79,26 +79,47 @@ class AdminApiTests(unittest.TestCase):
     def test_admin_games_rejects_unauthenticated_request(self) -> None:
         client = self._client()
 
-        response = client.get("/admin/games")
+        response = client.get("/api/events/admin/games")
 
         self.assertEqual(response.status_code, 401)
 
     def test_correct_password_allows_access(self) -> None:
         client = self._client()
 
-        login = client.post("/admin/login", data="password=secret", headers={"content-type": "application/x-www-form-urlencoded"})
-        response = client.get("/admin/games")
+        login = client.post("/api/events/admin/login", data="password=secret", headers={"content-type": "application/x-www-form-urlencoded"})
+        response = client.get("/api/events/admin/games")
 
         self.assertEqual(login.status_code, 200)
         self.assertEqual(response.status_code, 200)
         self.assertIn("Existing Game", response.text)
 
+    def test_admin_password_flow_does_not_require_read_api_key(self) -> None:
+        env = {
+            "ADMIN_UI_ENABLED": "1",
+            "ADMIN_PASSWORD": "secret",
+            "ADMIN_CONFIG_PATH": str(self.config_path),
+            "ADMIN_JOB_DIR": str(self.job_dir),
+            "ADMIN_GIT_ENABLED": "0",
+            "VN_EVENT_DW_API_KEY": "read-api-key",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            client = TestClient(create_app(db_path=self.db_path))
+            login = client.post(
+                "/api/events/admin/login",
+                data="password=secret",
+                headers={"content-type": "application/x-www-form-urlencoded"},
+            )
+            response = client.get("/api/events/admin/games")
+
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(response.status_code, 200)
+
     def test_add_game_preview_returns_expected_diff(self) -> None:
         client = self._client()
-        client.post("/admin/login", data="password=secret", headers={"content-type": "application/x-www-form-urlencoded"})
+        client.post("/api/events/admin/login", data="password=secret", headers={"content-type": "application/x-www-form-urlencoded"})
 
         response = client.post(
-            "/admin/games/preview",
+            "/api/events/admin/games/preview",
             data=(
                 "app_name=Preview+Game&"
                 "fb_page_id=preview_page&"
@@ -197,7 +218,7 @@ class AdminApiTests(unittest.TestCase):
 
     def test_failed_job_can_be_marked_manually_resolved(self) -> None:
         client = self._client()
-        client.post("/admin/login", data="password=secret", headers={"content-type": "application/x-www-form-urlencoded"})
+        client.post("/api/events/admin/login", data="password=secret", headers={"content-type": "application/x-www-form-urlencoded"})
         self.job_dir.mkdir(parents=True, exist_ok=True)
         job_id = "job_failed"
         (self.job_dir / "latest.txt").write_text(job_id + "\n", encoding="utf-8")
@@ -220,12 +241,12 @@ class AdminApiTests(unittest.TestCase):
         )
 
         response = client.post(
-            f"/admin/jobs/{job_id}/resolve",
+            f"/api/events/admin/jobs/{job_id}/resolve",
             data="note=Finished+from+terminal",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
-        job_page = client.get(f"/admin/jobs/{job_id}")
-        games_page = client.get("/admin/games")
+        job_page = client.get(f"/api/events/admin/jobs/{job_id}")
+        games_page = client.get("/api/events/admin/games")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("manually_resolved", job_page.text)

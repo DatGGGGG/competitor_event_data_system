@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,6 +68,8 @@ class AdminApiTests(unittest.TestCase):
         env = {
             "ADMIN_UI_ENABLED": "1",
             "ADMIN_PASSWORD": "secret",
+            "ADMIN_SESSION_SECRET": "test-admin-session-secret",
+            "ADMIN_COOKIE_SECURE": "0",
             "ADMIN_CONFIG_PATH": str(self.config_path),
             "ADMIN_JOB_DIR": str(self.job_dir),
             "ADMIN_GIT_ENABLED": "0",
@@ -75,6 +78,13 @@ class AdminApiTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         return TestClient(create_app(db_path=self.db_path))
+
+    def _csrf_token(self, client: TestClient) -> str:
+        response = client.get("/api/events/admin/games")
+        match = re.search(r'name="csrf_token" value="([^"]+)"', response.text)
+        self.assertIsNotNone(match)
+        assert match is not None
+        return match.group(1)
 
     def test_admin_games_rejects_unauthenticated_request(self) -> None:
         client = self._client()
@@ -97,6 +107,8 @@ class AdminApiTests(unittest.TestCase):
         env = {
             "ADMIN_UI_ENABLED": "1",
             "ADMIN_PASSWORD": "secret",
+            "ADMIN_SESSION_SECRET": "test-admin-session-secret",
+            "ADMIN_COOKIE_SECURE": "0",
             "ADMIN_CONFIG_PATH": str(self.config_path),
             "ADMIN_JOB_DIR": str(self.job_dir),
             "ADMIN_GIT_ENABLED": "0",
@@ -117,6 +129,7 @@ class AdminApiTests(unittest.TestCase):
     def test_add_game_preview_returns_expected_diff(self) -> None:
         client = self._client()
         client.post("/api/events/admin/login", data="password=secret", headers={"content-type": "application/x-www-form-urlencoded"})
+        csrf_token = self._csrf_token(client)
 
         response = client.post(
             "/api/events/admin/games/preview",
@@ -125,7 +138,7 @@ class AdminApiTests(unittest.TestCase):
                 "fb_page_id=preview_page&"
                 "android_app_id=com.preview.game&"
                 "ios_app_id=987654321&"
-                "country=VN"
+                f"country=VN&csrf_token={csrf_token}"
             ),
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
@@ -134,6 +147,56 @@ class AdminApiTests(unittest.TestCase):
         self.assertIn("Preview Game", response.text)
         self.assertIn("com.preview.game", response.text)
         self.assertIn("987654321", response.text)
+
+    def test_mutating_form_rejects_missing_csrf_token(self) -> None:
+        client = self._client()
+        client.post("/api/events/admin/login", data="password=secret", headers={"content-type": "application/x-www-form-urlencoded"})
+
+        response = client.post(
+            "/api/events/admin/games/preview",
+            data="app_name=Preview+Game&fb_page_id=preview_page&android_app_id=com.preview.game&ios_app_id=987654321&country=VN",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_portal_exchange_creates_workspace_scoped_session(self) -> None:
+        env = {
+            "ADMIN_UI_ENABLED": "1",
+            "ADMIN_AUTH_MODE": "portal",
+            "ADMIN_SESSION_SECRET": "test-admin-session-secret",
+            "ADMIN_COOKIE_SECURE": "0",
+            "ADMIN_ROUTE_PREFIX": "/workspaces/tracked-games/events",
+            "PORTAL_GRANT_CONSUME_URL": "http://portal.test/api/v1/internal/workspace-grants/consume",
+            "EVENT_WORKSPACE_SERVICE_TOKEN": "workspace-secret",
+            "ADMIN_CONFIG_PATH": str(self.config_path),
+            "ADMIN_JOB_DIR": str(self.job_dir),
+            "ADMIN_GIT_ENABLED": "0",
+        }
+
+        class PortalResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return None
+
+            def read(self):
+                return b'{"user_id":4,"email":"admin@garena.com","display_name":"Portal Admin","role":"admin"}'
+
+        with patch.dict(os.environ, env, clear=False), patch("vn_event_dw.admin.request.urlopen", return_value=PortalResponse()) as open_mock:
+            client = TestClient(create_app(db_path=self.db_path))
+            response = client.get("/workspaces/tracked-games/events/auth/exchange?code=one-time-code", follow_redirects=False)
+            landing = client.get("/workspaces/tracked-games/events/games")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/workspaces/tracked-games/events/games")
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
+        self.assertIn("Path=/workspaces/tracked-games/events", response.headers["set-cookie"])
+        self.assertEqual(landing.status_code, 200)
+        self.assertIn("Existing Game", landing.text)
+        outbound = open_mock.call_args.args[0]
+        self.assertEqual(outbound.get_header("Authorization"), "Bearer workspace-secret")
 
     def test_admin_settings_include_default_git_identity(self) -> None:
         env = {
@@ -219,6 +282,7 @@ class AdminApiTests(unittest.TestCase):
     def test_failed_job_can_be_marked_manually_resolved(self) -> None:
         client = self._client()
         client.post("/api/events/admin/login", data="password=secret", headers={"content-type": "application/x-www-form-urlencoded"})
+        csrf_token = self._csrf_token(client)
         self.job_dir.mkdir(parents=True, exist_ok=True)
         job_id = "job_failed"
         (self.job_dir / "latest.txt").write_text(job_id + "\n", encoding="utf-8")
@@ -242,7 +306,7 @@ class AdminApiTests(unittest.TestCase):
 
         response = client.post(
             f"/api/events/admin/jobs/{job_id}/resolve",
-            data="note=Finished+from+terminal",
+            data=f"note=Finished+from+terminal&csrf_token={csrf_token}",
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
         job_page = client.get(f"/api/events/admin/jobs/{job_id}")

@@ -45,9 +45,12 @@ curl \
   "https://market-data.garena.vn/api/events/v2/games"
 ```
 
-The tracked-games admin UI uses the separate `ADMIN_PASSWORD` login flow at
-`/api/events/admin/...`. This avoids the centralized Portal-owned `/admin/...`
-paths on `market-data.garena.vn`.
+The tracked-games admin UI is hosted at
+`/workspaces/tracked-games/events/...` and is opened through a short-lived,
+one-time Portal grant. During rollout it can retain `ADMIN_PASSWORD` as a
+fallback with `ADMIN_AUTH_MODE=portal_with_password_fallback`; production
+should switch to `ADMIN_AUTH_MODE=portal` after SSO is verified. The legacy
+`/api/events/admin/...` route temporarily redirects to the workspace path.
 
 ## Response Shape
 

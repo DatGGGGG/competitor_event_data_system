@@ -20,6 +20,9 @@ services:
   api:
     <<: *vn_event_dw_base
     restart: unless-stopped
+    networks:
+      - default
+      - market-data-gateway
     command:
       - vn-event-dw
       - serve-api
@@ -67,3 +70,7 @@ services:
       - --log=stdout
     ports:
       - "127.0.0.1:${NGROK_INSPECT_PORT:-4040}:4040"
+
+networks:
+  market-data-gateway:
+    external: true

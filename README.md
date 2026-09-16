@@ -51,15 +51,18 @@ The recommended production setup is:
 - Docker Compose deployment
 - SQLite database stored on the VM host
 - tracked-game config managed through `examples/config.json`
-- optional password-protected admin UI for adding tracked games
+- Portal SSO-protected admin UI for adding tracked games (with an optional
+  password fallback during rollout)
 - Socialdata sync via Google service-account authentication
 - Sensor Tower sync via API token
 - unified-event build via Compass Gateway / OpenAI-compatible API
 - weekly scheduled refresh on the VM
 
-When enabled, the tracked-games admin UI is available at
-`/api/events/admin/games`, rather than `/admin/games`, because the latter is
-reserved for the centralized VN Market Data Portal.
+When Portal SSO is enabled, the tracked-games admin UI is available at
+`/workspaces/tracked-games/events/games`. The temporary
+`/api/events/admin/games` path redirects there during rollout.
+The Event API joins the private `market-data-gateway` Docker network so it can
+consume grants from the Portal without exposing its service token to browsers.
 
 The current VM-side pipeline wrapper:
 
@@ -231,7 +234,7 @@ sudo docker compose --env-file deploy/docker/vm.env -f deploy/docker/docker-comp
 Then open:
 
 ```text
-https://market-data.garena.vn/api/events/admin/games
+https://market-data.garena.vn/workspaces/tracked-games/events/games
 ```
 
 What the UI does after a game is applied:

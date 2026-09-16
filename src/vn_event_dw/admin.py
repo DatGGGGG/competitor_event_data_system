@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hmac
 import html
 import json
@@ -9,11 +10,12 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib import parse
+from urllib import error, parse, request
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -36,12 +38,21 @@ ADMIN_COOKIE_NAME = "vn_event_dw_admin"
 # Keep this operational UI within the Event service namespace so the VM router
 # can forward it alongside the Event API.
 ADMIN_ROUTE_PREFIX = "/api/events/admin"
+WORKSPACE_ROUTE_PREFIX = "/workspaces/tracked-games/events"
+PORTAL_EXCHANGE_RATE_WINDOWS: dict[str, list[float]] = {}
 
 
 @dataclass(frozen=True, slots=True)
 class AdminSettings:
     enabled: bool
     password: str
+    auth_mode: str
+    portal_grant_consume_url: str
+    workspace_service_token: str
+    session_secret: str
+    session_ttl_seconds: int
+    route_prefix: str
+    cookie_secure: bool
     config_path: Path
     db_path: Path
     job_dir: Path
@@ -121,6 +132,13 @@ def load_admin_settings(*, db_path: Path) -> AdminSettings:
     return AdminSettings(
         enabled=admin_enabled_from_env(),
         password=os.getenv("ADMIN_PASSWORD", "").strip(),
+        auth_mode=_admin_auth_mode(),
+        portal_grant_consume_url=os.getenv("PORTAL_GRANT_CONSUME_URL", "").strip(),
+        workspace_service_token=os.getenv("EVENT_WORKSPACE_SERVICE_TOKEN", "").strip(),
+        session_secret=os.getenv("ADMIN_SESSION_SECRET", "").strip(),
+        session_ttl_seconds=_positive_int_env("ADMIN_SESSION_TTL_SECONDS", 1800),
+        route_prefix=_admin_route_prefix(),
+        cookie_secure=_bool_env("ADMIN_COOKIE_SECURE", default=True),
         config_path=config_path,
         db_path=Path(os.getenv("ADMIN_DB_PATH", str(db_path))),
         job_dir=Path(os.getenv("ADMIN_JOB_DIR", "/app/data/admin_jobs")),
@@ -140,54 +158,136 @@ def load_admin_settings(*, db_path: Path) -> AdminSettings:
     )
 
 
+def _admin_auth_mode() -> str:
+    value = os.getenv("ADMIN_AUTH_MODE", "password").strip().lower() or "password"
+    if value not in {"password", "portal_with_password_fallback", "portal"}:
+        raise RuntimeError("ADMIN_AUTH_MODE must be password, portal_with_password_fallback, or portal.")
+    return value
+
+
+def _admin_route_prefix() -> str:
+    value = os.getenv("ADMIN_ROUTE_PREFIX", ADMIN_ROUTE_PREFIX).strip().rstrip("/")
+    if not value.startswith("/") or value == "/":
+        raise RuntimeError("ADMIN_ROUTE_PREFIX must be a non-root absolute path.")
+    return value
+
+
+def _bool_env(name: str, *, default: bool) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    return default if not value else value in {"1", "true", "yes", "y"}
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        return max(60, min(int(os.getenv(name, str(default))), 86_400))
+    except ValueError:
+        return default
+
+
 def create_admin_router(*, db_path: Path) -> APIRouter:
     settings = load_admin_settings(db_path=db_path)
     store = AdminJobStore(settings.job_dir)
-    router = APIRouter(prefix=ADMIN_ROUTE_PREFIX)
+    router = APIRouter(prefix=settings.route_prefix)
 
-    def require_admin(request_obj: Request) -> None:
+    def require_admin(request_obj: Request) -> dict[str, Any]:
         if not settings.enabled:
             raise HTTPException(status_code=404, detail="Admin UI is disabled.")
-        if not settings.password:
-            raise HTTPException(status_code=503, detail="ADMIN_PASSWORD is required when admin UI is enabled.")
-        cookie_value = request_obj.cookies.get(ADMIN_COOKIE_NAME, "")
-        if not _valid_cookie(cookie_value, settings.password):
+        claims = _read_admin_session(request_obj, settings)
+        if not claims or claims.get("role") != "admin":
             raise HTTPException(status_code=401, detail="Admin login required.")
+        return claims
+
+    def check_csrf(form: dict[str, str], claims: dict[str, Any]) -> None:
+        expected = str(claims.get("csrf", ""))
+        if not expected or not hmac.compare_digest(form.get("csrf_token", ""), expected):
+            raise HTTPException(status_code=403, detail="Invalid admin CSRF token.")
+
+    def require_recent_portal_session(claims: dict[str, Any]) -> None:
+        if claims.get("user_id") == "password-admin":
+            return
+        issued_at = int(claims.get("issued_at", 0))
+        if issued_at < int(datetime.now(timezone.utc).timestamp()) - 300:
+            raise HTTPException(status_code=401, detail="Reopen this workspace from the Portal before making a sensitive change.")
+
+    def enforce_exchange_rate_limit(request_obj: Request) -> None:
+        client = request_obj.client.host if request_obj.client else "unknown"
+        now = time.monotonic()
+        window = [stamp for stamp in PORTAL_EXCHANGE_RATE_WINDOWS.get(client, []) if stamp > now - 60]
+        if len(window) >= 30:
+            raise HTTPException(status_code=429, detail="Too many workspace sign-in attempts. Please try again shortly.")
+        window.append(now)
+        PORTAL_EXCHANGE_RATE_WINDOWS[client] = window
+
+    def exchange_portal_code(code: str) -> dict[str, Any]:
+        if not settings.portal_grant_consume_url or not settings.workspace_service_token or not settings.session_secret:
+            raise HTTPException(status_code=503, detail="Portal workspace sign-in is not configured.")
+        body = json.dumps({"code": code, "audience": "event-tracked-games"}).encode("utf-8")
+        outbound = request.Request(
+            settings.portal_grant_consume_url,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {settings.workspace_service_token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with request.urlopen(outbound, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (error.URLError, error.HTTPError, TimeoutError, ValueError, OSError) as exc:
+            raise HTTPException(status_code=401, detail="The workspace sign-in code is invalid or expired.") from exc
+        if not isinstance(payload, dict) or payload.get("role") != "admin":
+            raise HTTPException(status_code=401, detail="The workspace sign-in code is invalid or expired.")
+        if not isinstance(payload.get("user_id"), int) or not isinstance(payload.get("email"), str):
+            raise HTTPException(status_code=401, detail="The workspace sign-in code is invalid or expired.")
+        return payload
 
     @router.get("", response_class=HTMLResponse)
     def admin_home(request_obj: Request) -> Response:
-        if _is_authenticated(request_obj, settings.password):
-            return RedirectResponse(f"{ADMIN_ROUTE_PREFIX}/games", status_code=303)
-        return _html_response(_render_login_page(settings=settings))
+        if _read_admin_session(request_obj, settings):
+            return RedirectResponse(f"{settings.route_prefix}/games", status_code=303)
+        if settings.auth_mode == "portal":
+            return _html_response(_render_portal_login_required_page(), status_code=401)
+        return _html_response(_render_login_page(settings=settings, route_prefix=settings.route_prefix))
+
+    @router.get("/auth/exchange")
+    def admin_auth_exchange(request_obj: Request, code: str = "") -> Response:
+        if not settings.enabled or settings.auth_mode == "password" or not code:
+            raise HTTPException(status_code=401, detail="The workspace sign-in code is invalid or expired.")
+        enforce_exchange_rate_limit(request_obj)
+        identity = exchange_portal_code(code)
+        response = RedirectResponse(f"{settings.route_prefix}/games", status_code=303)
+        _set_admin_session(response, settings, _portal_session_claims(identity))
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @router.post("/login")
     async def admin_login(request_obj: Request) -> Response:
         form = await _read_urlencoded_form(request_obj)
         if not settings.enabled:
             raise HTTPException(status_code=404, detail="Admin UI is disabled.")
+        if settings.auth_mode == "portal":
+            raise HTTPException(status_code=404, detail="Password login is disabled.")
         if not settings.password:
-            return _html_response(_render_login_page(settings=settings, error="ADMIN_PASSWORD is not configured."), status_code=503)
+            return _html_response(_render_login_page(settings=settings, route_prefix=settings.route_prefix, error="ADMIN_PASSWORD is not configured."), status_code=503)
         if not hmac.compare_digest(form.get("password", ""), settings.password):
-            return _html_response(_render_login_page(settings=settings, error="Wrong password."), status_code=401)
-        response = RedirectResponse(f"{ADMIN_ROUTE_PREFIX}/games", status_code=303)
-        response.set_cookie(
-            ADMIN_COOKIE_NAME,
-            _cookie_value(settings.password),
-            httponly=True,
-            samesite="lax",
-            secure=False,
-        )
+            return _html_response(_render_login_page(settings=settings, route_prefix=settings.route_prefix, error="Wrong password."), status_code=401)
+        response = RedirectResponse(f"{settings.route_prefix}/games", status_code=303)
+        _set_admin_session(response, settings, _password_session_claims())
         return response
 
     @router.post("/logout")
-    def admin_logout() -> Response:
-        response = RedirectResponse(ADMIN_ROUTE_PREFIX, status_code=303)
-        response.delete_cookie(ADMIN_COOKIE_NAME)
+    async def admin_logout(request_obj: Request) -> Response:
+        claims = require_admin(request_obj)
+        check_csrf(await _read_urlencoded_form(request_obj), claims)
+        response = RedirectResponse(settings.route_prefix, status_code=303)
+        response.delete_cookie(ADMIN_COOKIE_NAME, path=settings.route_prefix)
         return response
 
     @router.get("/games", response_class=HTMLResponse)
     def admin_games(request_obj: Request) -> Response:
-        require_admin(request_obj)
+        claims = require_admin(request_obj)
         payload = load_config_payload(settings.config_path)
         latest_job_id = store.latest_job_id()
         latest_job = None
@@ -196,12 +296,13 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
                 latest_job = store.read(latest_job_id)
             except KeyError:
                 latest_job = None
-        return _html_response(_render_games_page(settings=settings, payload=payload, latest_job=latest_job))
+        return _html_response(_render_games_page(settings=settings, payload=payload, latest_job=latest_job, csrf_token=str(claims["csrf"])))
 
     @router.post("/games/preview", response_class=HTMLResponse)
     async def admin_games_preview(request_obj: Request) -> Response:
-        require_admin(request_obj)
         form = await _read_urlencoded_form(request_obj)
+        claims = require_admin(request_obj)
+        check_csrf(form, claims)
         try:
             payload = load_config_payload(settings.config_path)
             preview = build_game_preview(payload, _game_input_from_form(form))
@@ -209,15 +310,17 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
         except (AdminConfigError, json.JSONDecodeError) as exc:
             current_payload = load_config_payload(settings.config_path)
             return _html_response(
-                _render_games_page(settings=settings, payload=current_payload, latest_job=None, form=form, error=str(exc)),
+                _render_games_page(settings=settings, payload=current_payload, latest_job=None, csrf_token=str(claims["csrf"]), form=form, error=str(exc)),
                 status_code=400,
             )
-        return _html_response(_render_preview_page(settings=settings, preview=preview, form=form))
+        return _html_response(_render_preview_page(settings=settings, preview=preview, form=form, csrf_token=str(claims["csrf"])))
 
     @router.post("/games/apply")
     async def admin_games_apply(request_obj: Request) -> Response:
-        require_admin(request_obj)
         form = await _read_urlencoded_form(request_obj)
+        claims = require_admin(request_obj)
+        check_csrf(form, claims)
+        require_recent_portal_session(claims)
         payload = load_config_payload(settings.config_path)
         preview = build_game_preview(payload, _game_input_from_form(form))
         updated_payload = add_game_to_payload(payload, preview)
@@ -228,6 +331,7 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
                 "unified_app_id": preview.unified_app_id,
                 "app_name": preview.app_name,
                 "fb_page_id": preview.fb_page_id,
+                "actor": _actor_from_claims(claims),
             },
         )
         thread = threading.Thread(
@@ -239,25 +343,28 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
                 "updated_payload": updated_payload,
                 "preview": preview,
                 "db_path": db_path,
+                "actor": _actor_from_claims(claims),
             },
             daemon=True,
         )
         thread.start()
-        return RedirectResponse(f"{ADMIN_ROUTE_PREFIX}/jobs/{job_id}", status_code=303)
+        return RedirectResponse(f"{settings.route_prefix}/jobs/{job_id}", status_code=303)
 
     @router.get("/jobs/{job_id}", response_class=HTMLResponse)
     def admin_job(request_obj: Request, job_id: str) -> Response:
-        require_admin(request_obj)
+        claims = require_admin(request_obj)
         try:
             job = store.read(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Admin job not found.") from exc
-        return _html_response(_render_job_page(job))
+        return _html_response(_render_job_page(job, route_prefix=settings.route_prefix, csrf_token=str(claims["csrf"])))
 
     @router.post("/jobs/{job_id}/resolve")
     async def admin_job_resolve(request_obj: Request, job_id: str) -> Response:
-        require_admin(request_obj)
         form = await _read_urlencoded_form(request_obj)
+        claims = require_admin(request_obj)
+        check_csrf(form, claims)
+        require_recent_portal_session(claims)
         try:
             job = store.read(job_id)
         except KeyError as exc:
@@ -277,9 +384,10 @@ def create_admin_router(*, db_path: Path) -> APIRouter:
             manual_resolution={
                 "resolved_at": resolved_at,
                 "note": note,
+                "actor": _actor_from_claims(claims),
             },
         )
-        return RedirectResponse(f"{ADMIN_ROUTE_PREFIX}/jobs/{job_id}", status_code=303)
+        return RedirectResponse(f"{settings.route_prefix}/jobs/{job_id}", status_code=303)
 
     return router
 
@@ -292,11 +400,13 @@ def _run_apply_job(
     updated_payload: dict[str, Any],
     preview: Any,
     db_path: Path,
+    actor: dict[str, Any],
 ) -> None:
     store.update(job_id, status="running", started_at=_utc_now())
     pre_head = None
     git_pushed = not settings.git_enabled
     try:
+        _job_log(store, job_id, f"Actor: {actor.get('display_name')} <{actor.get('email')}>")
         if settings.git_enabled:
             pre_head = _run_git_preflight(settings=settings, store=store, job_id=job_id)
 
@@ -306,7 +416,7 @@ def _run_apply_job(
         _run_command(store, job_id, [sys.executable, "-m", "json.tool", str(settings.config_path)])
 
         if settings.git_enabled:
-            _run_git_flow(settings=settings, store=store, job_id=job_id, app_name=preview.app_name)
+            _run_git_flow(settings=settings, store=store, job_id=job_id, app_name=preview.app_name, actor=actor)
             git_pushed = True
         else:
             _job_log(store, job_id, "Skipping git commit/push because ADMIN_GIT_ENABLED=0.")
@@ -359,11 +469,12 @@ def _run_git_preflight(*, settings: AdminSettings, store: AdminJobStore, job_id:
     return pre_head.stdout.strip()
 
 
-def _run_git_flow(*, settings: AdminSettings, store: AdminJobStore, job_id: str, app_name: str) -> None:
+def _run_git_flow(*, settings: AdminSettings, store: AdminJobStore, job_id: str, app_name: str, actor: dict[str, Any]) -> None:
     git = _git_command(settings)
     _run_command(store, job_id, [*git, "status", "--short"], cwd=settings.repo_root)
     _run_command(store, job_id, [*git, "add", settings.repo_config_path], cwd=settings.repo_root)
-    message = f"Add tracked game: {app_name}"
+    actor_label = str(actor.get("email") or actor.get("display_name") or "unknown administrator")
+    message = f"Add tracked game: {app_name} (requested by {actor_label})"
     commit = _run_command(
         store,
         job_id,
@@ -584,16 +695,64 @@ async def _read_urlencoded_form(request_obj: Request) -> dict[str, str]:
     return {key: values[-1] if values else "" for key, values in parsed.items()}
 
 
-def _cookie_value(password: str) -> str:
-    return hmac.new(password.encode("utf-8"), b"vn-event-dw-admin", "sha256").hexdigest()
+def _b64encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 
 
-def _valid_cookie(cookie_value: str, password: str) -> bool:
-    return bool(password) and hmac.compare_digest(cookie_value, _cookie_value(password))
+def _b64decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def _is_authenticated(request_obj: Request, password: str) -> bool:
-    return _valid_cookie(request_obj.cookies.get(ADMIN_COOKIE_NAME, ""), password)
+def _password_session_claims() -> dict[str, Any]:
+    now = int(datetime.now(timezone.utc).timestamp())
+    return {"user_id": "password-admin", "email": "password-admin", "display_name": "Password administrator", "role": "admin", "issued_at": now, "csrf": secrets.token_urlsafe(24)}
+
+
+def _portal_session_claims(identity: dict[str, Any]) -> dict[str, Any]:
+    now = int(datetime.now(timezone.utc).timestamp())
+    return {"user_id": identity["user_id"], "email": identity["email"], "display_name": str(identity.get("display_name") or identity["email"]), "role": "admin", "issued_at": now, "csrf": secrets.token_urlsafe(24)}
+
+
+def _actor_from_claims(claims: dict[str, Any]) -> dict[str, Any]:
+    return {key: claims.get(key) for key in ("user_id", "email", "display_name", "role")}
+
+
+def _encode_admin_session(settings: AdminSettings, claims: dict[str, Any]) -> str:
+    if not settings.session_secret:
+        raise HTTPException(status_code=503, detail="ADMIN_SESSION_SECRET is required when admin UI is enabled.")
+    payload = {**claims, "expires_at": int(datetime.now(timezone.utc).timestamp()) + settings.session_ttl_seconds}
+    encoded = _b64encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    signature = _b64encode(hmac.new(settings.session_secret.encode("utf-8"), encoded.encode("ascii"), "sha256").digest())
+    return f"{encoded}.{signature}"
+
+
+def _read_admin_session(request_obj: Request, settings: AdminSettings) -> dict[str, Any] | None:
+    token = request_obj.cookies.get(ADMIN_COOKIE_NAME, "")
+    if not token or not settings.session_secret or "." not in token:
+        return None
+    encoded, signature = token.rsplit(".", 1)
+    expected = _b64encode(hmac.new(settings.session_secret.encode("utf-8"), encoded.encode("ascii"), "sha256").digest())
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        claims = json.loads(_b64decode(encoded).decode("utf-8"))
+        if not isinstance(claims, dict) or int(claims.get("expires_at", 0)) <= int(datetime.now(timezone.utc).timestamp()):
+            return None
+        return claims
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def _set_admin_session(response: Response, settings: AdminSettings, claims: dict[str, Any]) -> None:
+    response.set_cookie(
+        ADMIN_COOKIE_NAME,
+        _encode_admin_session(settings, claims),
+        max_age=settings.session_ttl_seconds,
+        path=settings.route_prefix,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+    )
 
 
 def _job_log(store: AdminJobStore, job_id: str, text: str) -> None:
@@ -642,7 +801,7 @@ def _page(title: str, body: str) -> str:
 </html>"""
 
 
-def _render_login_page(*, settings: AdminSettings, error: str | None = None) -> str:
+def _render_login_page(*, settings: AdminSettings, route_prefix: str, error: str | None = None) -> str:
     status = "" if settings.enabled else "<p class='danger'>Admin UI is disabled.</p>"
     error_html = f"<p class='danger'>{html.escape(error)}</p>" if error else ""
     return _page(
@@ -653,7 +812,7 @@ def _render_login_page(*, settings: AdminSettings, error: str | None = None) -> 
           <p>Add tracked games without touching the VM terminal.</p>
           {status}
           {error_html}
-          <form method="post" action="{ADMIN_ROUTE_PREFIX}/login">
+          <form method="post" action="{route_prefix}/login">
             <label>Password</label>
             <input type="password" name="password" autofocus>
             <p><button type="submit">Log in</button></p>
@@ -663,11 +822,16 @@ def _render_login_page(*, settings: AdminSettings, error: str | None = None) -> 
     )
 
 
+def _render_portal_login_required_page() -> str:
+    return _page("VN Event DW Admin", "<section class='card'><h1>VN Event DW Admin</h1><p>Open this workspace from VN Market Data Portal to sign in.</p></section>")
+
+
 def _render_games_page(
     *,
     settings: AdminSettings,
     payload: dict[str, Any],
     latest_job: dict[str, Any] | None,
+    csrf_token: str,
     form: dict[str, str] | None = None,
     error: str | None = None,
 ) -> str:
@@ -684,7 +848,7 @@ def _render_games_page(
         else:
             status_label = status
         latest_html = (
-            f"<p>Latest job: <a class='button ghost' href='{ADMIN_ROUTE_PREFIX}/jobs/{html.escape(str(latest_job['job_id']))}'>"
+            f"<p>Latest job: <a class='button ghost' href='{settings.route_prefix}/jobs/{html.escape(str(latest_job['job_id']))}'>"
             f"{html.escape(status_label)} - {html.escape(str(latest_job['title']))}</a></p>"
         )
     values = form or {}
@@ -696,12 +860,13 @@ def _render_games_page(
           <h1>Tracked Games</h1>
           <p>Config source: <code>{html.escape(str(settings.config_path))}</code></p>
           {latest_html}
-          <form method="post" action="{ADMIN_ROUTE_PREFIX}/logout"><button class="ghost" type="submit">Log out</button></form>
+          <form method="post" action="{settings.route_prefix}/logout"><input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}"><button class="ghost" type="submit">Log out</button></form>
         </section>
         <section class="card">
           <h2>Add New Game</h2>
           {error_html}
-          <form method="post" action="{ADMIN_ROUTE_PREFIX}/games/preview">
+          <form method="post" action="{settings.route_prefix}/games/preview">
+            <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
             <div class="grid">
               <div><label>Game name</label><input name="app_name" value="{html.escape(values.get('app_name', ''))}" required></div>
               <div><label>Facebook page ID</label><input name="fb_page_id" value="{html.escape(values.get('fb_page_id', ''))}" required></div>
@@ -721,7 +886,7 @@ def _render_games_page(
     )
 
 
-def _render_preview_page(*, settings: AdminSettings, preview: Any, form: dict[str, str]) -> str:
+def _render_preview_page(*, settings: AdminSettings, preview: Any, form: dict[str, str], csrf_token: str) -> str:
     hidden = "\n".join(
         f'<input type="hidden" name="{html.escape(key)}" value="{html.escape(value)}">'
         for key, value in form.items()
@@ -741,17 +906,18 @@ def _render_preview_page(*, settings: AdminSettings, preview: Any, form: dict[st
           <h1>Preview Change</h1>
           <p>This will add <strong>{html.escape(preview.app_name)}</strong> and then run a targeted {settings.backfill_lookback_days}-day backfill.</p>
           <pre>{html.escape(preview_json)}</pre>
-          <form method="post" action="{ADMIN_ROUTE_PREFIX}/games/apply">
+          <form method="post" action="{settings.route_prefix}/games/apply">
             {hidden}
+            <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
             <button type="submit">Apply, Commit, Push, And Backfill</button>
-            <a class="button ghost" href="{ADMIN_ROUTE_PREFIX}/games">Cancel</a>
+            <a class="button ghost" href="{settings.route_prefix}/games">Cancel</a>
           </form>
         </section>
         """,
     )
 
 
-def _render_job_page(job: dict[str, Any]) -> str:
+def _render_job_page(job: dict[str, Any], *, route_prefix: str, csrf_token: str) -> str:
     log = "\n".join(str(item) for item in job.get("log", []))
     refresh = "<script>setTimeout(function(){ window.location.reload(); }, 10000);</script>" if job.get("status") in {"queued", "running"} else ""
     resolution = job.get("manual_resolution") if isinstance(job.get("manual_resolution"), dict) else None
@@ -765,7 +931,8 @@ def _render_job_page(job: dict[str, Any]) -> str:
     resolve_html = ""
     if job.get("status") == "failed":
         resolve_html = """
-          <form method="post" action="{ADMIN_ROUTE_PREFIX}/jobs/{job_id}/resolve">
+          <form method="post" action="{route_prefix}/jobs/{job_id}/resolve">
+            <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
             <label>Manual resolution note</label>
             <input name="note" placeholder="Example: Finished targeted backfill manually from VM terminal.">
             <p><button type="submit">Mark Manually Resolved</button></p>
@@ -781,7 +948,7 @@ def _render_job_page(job: dict[str, Any]) -> str:
           <p>Created: {html.escape(str(job.get('created_at')))} | Started: {html.escape(str(job.get('started_at')))} | Finished: {html.escape(str(job.get('finished_at')))}</p>
           {resolution_html}
           {resolve_html}
-          <p><a class="button ghost" href="{ADMIN_ROUTE_PREFIX}/games">Back to games</a></p>
+          <p><a class="button ghost" href="{route_prefix}/games">Back to games</a></p>
         </section>
         <section class="card">
           <h2>Log</h2>

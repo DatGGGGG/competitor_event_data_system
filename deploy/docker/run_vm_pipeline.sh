@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
@@ -15,6 +15,19 @@ timestamp() {
 log() {
   echo "[$(timestamp)] $*"
 }
+
+# `set -e` normally exits immediately on a failed pipeline step. Emit a final,
+# machine-readable status first so operational reporting never mislabels a
+# failed run as still running.
+current_step="initializing"
+on_pipeline_error() {
+  local exit_code=$?
+  trap - ERR
+  log "vm_pipeline_failed exit_code=${exit_code} step=${current_step}"
+  exit "${exit_code}"
+}
+
+trap on_pipeline_error ERR
 
 require_file() {
   local path="$1"
@@ -49,17 +62,21 @@ compose() {
 }
 
 run_job() {
-  log "job_start: $*"
+  current_step="$*"
+  log "job_start: ${current_step}"
   compose --profile ops run --rm --no-deps job "$@"
-  log "job_done: $*"
+  log "job_done: ${current_step}"
+  current_step="idle"
 }
 
 run_job_python() {
   local description="$1"
   shift
-  log "job_start: ${description}"
+  current_step="${description}"
+  log "job_start: ${current_step}"
   compose --profile ops run --rm --no-deps job python "$@"
-  log "job_done: ${description}"
+  log "job_done: ${current_step}"
+  current_step="idle"
 }
 
 resolve_months() {
@@ -215,17 +232,23 @@ for month in "${TARGET_MONTHS[@]}"; do
 done
 
 if [[ "${PIPELINE_RESTART_API}" == "1" ]]; then
+  current_step="restart API"
   log "api_restart_started"
   compose restart api
   log "api_restart_completed"
+  current_step="idle"
 fi
 
 if [[ "${PIPELINE_VERIFY_API}" == "1" ]]; then
+  current_step="verify API health"
   wait_for_api_healthy "${PIPELINE_API_HEALTH_TIMEOUT_SECONDS}"
+  current_step="idle"
 fi
 
 if [[ "${PIPELINE_VERIFY_DB}" == "1" ]]; then
+  current_step="verify database state"
   verify_db_state "${DB_PATH}" "${TARGET_MONTHS[@]}"
+  current_step="idle"
 fi
 
 log "vm_pipeline_completed"

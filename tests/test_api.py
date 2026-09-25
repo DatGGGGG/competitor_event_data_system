@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
 import uuid
@@ -676,6 +677,64 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["results"], [{"unified_app_id": "mlbb_app", "app_name": "Mobile Legends: Bang Bang"}])
         self.assertEqual(payload["meta"]["semantics"], "registered_games")
         self.assertEqual(payload["meta"]["count"], 1)
+
+    def test_openapi_exposes_only_the_canonical_portal_contract(self) -> None:
+        admin_job_dir = self.db_path.parent / f"test_openapi_admin_jobs_{self.db_path.stem}"
+        with patch.dict(
+            "os.environ",
+            {
+                "VN_EVENT_DW_API_KEY": "test-secret",
+                "VN_EVENT_DW_API_KEYS_FILE": "",
+                "ADMIN_UI_ENABLED": "1",
+                "ADMIN_PASSWORD": "test-admin-password",
+                "ADMIN_JOB_DIR": str(admin_job_dir),
+            },
+            clear=False,
+        ):
+            client = TestClient(create_app(db_path=self.db_path))
+            response = client.get("/openapi.json")
+
+        if admin_job_dir.exists():
+            admin_job_dir.rmdir()
+
+        self.assertEqual(response.status_code, 200)
+        schema = response.json()
+        self.assertTrue(schema["openapi"].startswith("3."))
+        self.assertEqual(schema["info"]["x-portal-source"], "events")
+        self.assertEqual(schema["info"]["x-portal-contract-version"], 1)
+        self.assertIn("EventApiKey", schema["components"]["securitySchemes"])
+        self.assertEqual(schema["components"]["securitySchemes"]["EventApiKey"]["name"], "X-API-Key")
+
+        canonical_paths = {
+            "/api/events/v2/health",
+            "/api/events/v2/games",
+            "/api/events/v2/games/{unified_app_id}",
+            "/api/events/v2/games/{unified_app_id}/events",
+            "/api/events/v2/games/{unified_app_id}/events/summary",
+            "/api/events/v2/games/{unified_app_id}/events/search",
+            "/api/events/v2/games/{unified_app_id}/events/coverage",
+            "/api/events/v2/games/{unified_app_id}/posts",
+            "/api/events/v2/events/{unified_event_id}",
+            "/api/events/v2/events/{unified_event_id}/post-stats",
+            "/api/events/v2/events/{unified_event_id}/posts",
+            "/api/events/v2/posts/{source_post_id}",
+        }
+        self.assertEqual(set(schema["paths"]), canonical_paths)
+        for path in canonical_paths:
+            operation = schema["paths"][path]["get"]
+            self.assertTrue(operation["x-portal-public"])
+            self.assertTrue(operation["operationId"])
+            self.assertTrue(operation["summary"])
+            self.assertTrue(operation["description"])
+            self.assertIn("200", operation["responses"])
+            self.assertIn("schema", operation["responses"]["200"]["content"]["application/json"])
+
+        self.assertNotIn("/api/v2/games", schema["paths"])
+        self.assertNotIn("/api/games", schema["paths"])
+        self.assertFalse(any(path.startswith("/api/events/admin") for path in schema["paths"]))
+        self.assertFalse(any(path.startswith("/workspaces/tracked-games/events") for path in schema["paths"]))
+        self.assertNotIn("test-secret", json.dumps(schema))
+        self.assertNotIn("test-admin-password", json.dumps(schema))
 
     def test_events_v2_namespace_alias_matches_legacy_v2(self) -> None:
         legacy_response = self.client.get(

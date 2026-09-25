@@ -114,6 +114,11 @@ New agents should use `/api/events/v2` because it separates event month buckets 
 - [Agent-Friendly API v2](./docs/api_v2.md)
 - [Agent Instructions For API v2](./docs/api_v2_agent_instructions.md)
 
+The deployed `GET /openapi.json` schema is the Portal-facing source of truth
+for this canonical contract. The Portal imports it server-to-server through an
+explicit configured URL, so API documentation changes become visible in
+production only after this module is deployed.
+
 Legacy `/api` endpoints remain live for backward compatibility:
 
 - `GET /api/games`

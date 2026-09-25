@@ -6,6 +6,20 @@ It keeps the legacy `/api/v2/...` and old `/api/...` endpoints live while making
 - event endpoints filter by `unified_events.month_bucket`
 - raw post endpoints filter by `raw_fb_posts.publish_time`
 
+## Portal Contract Source
+
+The deployed service's `GET /openapi.json` is the Portal-facing source of
+truth for the canonical `/api/events/v2` contract. It includes the Event
+source marker, contract version, public operation metadata, response models,
+and native Event API-key scheme. The Portal imports that schema using its
+configured `EVENT_OPENAPI_URL`; deploy this module before expecting Portal API
+documentation to change.
+
+Legacy `/api/v2/...`, older `/api/...`, and tracked-game admin workspace routes
+remain operational where needed, but are intentionally excluded from OpenAPI.
+Use this Markdown document for operator/developer background rather than as the
+authoritative Portal API definition.
+
 Base URLs:
 
 - Public: `https://market-data.garena.vn`

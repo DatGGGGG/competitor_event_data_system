@@ -187,7 +187,9 @@ def _positive_int_env(name: str, default: int) -> int:
 def create_admin_router(*, db_path: Path) -> APIRouter:
     settings = load_admin_settings(db_path=db_path)
     store = AdminJobStore(settings.job_dir)
-    router = APIRouter(prefix=settings.route_prefix)
+    # This operational HTML workflow is intentionally not part of the
+    # Portal-imported public data contract.
+    router = APIRouter(prefix=settings.route_prefix, include_in_schema=False)
 
     def require_admin(request_obj: Request) -> dict[str, Any]:
         if not settings.enabled:

@@ -14,6 +14,7 @@ API_KEY_ENV_VAR = "VN_EVENT_DW_API_KEY"
 API_KEYS_FILE_ENV_VAR = "VN_EVENT_DW_API_KEYS_FILE"
 API_KEY_HEADER = "X-API-Key"
 PUBLIC_API_PATHS = {"/api/v2/health", "/api/events/v2/health"}
+PUBLIC_SCHEMA_PATHS = {"/openapi.json"}
 ADMIN_UI_PREFIX = "/api/events/admin"
 WORKSPACE_ADMIN_PREFIX = "/workspaces/tracked-games/events"
 
@@ -58,6 +59,11 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     """Protect public read APIs when an API key env setting is configured."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        # The Portal imports this schema server-to-server. It contains only
+        # public contract metadata; credentials and runtime configuration are
+        # never inserted into it.
+        if request.url.path in PUBLIC_SCHEMA_PATHS:
+            return await call_next(request)
         # The operational admin UI has its own password session and lives in
         # the Event namespace to avoid colliding with the central Portal.
         if request.url.path.startswith((ADMIN_UI_PREFIX, WORKSPACE_ADMIN_PREFIX)):

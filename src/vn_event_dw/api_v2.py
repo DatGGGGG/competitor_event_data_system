@@ -5,8 +5,8 @@ from pathlib import Path
 import re
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Path as ApiPath, Query
+from pydantic import BaseModel, Field
 
 from .api_service import (
     fetch_event_coverage_for_game_by_months,
@@ -25,6 +25,43 @@ from .etl import open_connection
 API_VERSION = "v2"
 MONTH_PATTERN = re.compile(r"^\d{4}-\d{2}$")
 SourceType = Literal["fb_post", "st_app_update_event", "st_version_event"]
+PORTAL_PUBLIC = {"x-portal-public": True}
+PORTAL_AUTHENTICATED = {"x-portal-public": True, "security": [{"EventApiKey": []}]}
+
+GameId = Annotated[str, ApiPath(description="Stable tracked-game identifier returned by the games endpoint.")]
+EventId = Annotated[str, ApiPath(description="Stable unified-event identifier returned by an event endpoint.")]
+PostId = Annotated[str, ApiPath(description="Facebook source-post identifier returned by a posts endpoint.")]
+MonthFilter = Annotated[
+    list[str] | None,
+    Query(description="Repeatable event month bucket in YYYY-MM format. Use this or start_month/end_month, not both."),
+]
+StartMonth = Annotated[str | None, Query(description="Inclusive first event month bucket in YYYY-MM format; requires end_month.")]
+EndMonth = Annotated[str | None, Query(description="Inclusive final event month bucket in YYYY-MM format; requires start_month.")]
+EventCategoryFilter = Annotated[list[str] | None, Query(description="Repeatable exact event-category filter.")]
+SourceTypeFilter = Annotated[list[SourceType] | None, Query(description="Repeatable evidence-source filter.")]
+MinimumSocialScore = Annotated[int | None, Query(ge=0, description="Keep events with this minimum Facebook social score.")]
+HasFacebookPosts = Annotated[bool | None, Query(description="Filter events by whether they have linked Facebook posts.")]
+ResultLimit = Annotated[int | None, Query(ge=1, description="Maximum number of events to return, ranked by social score.")]
+SearchLimit = Annotated[int, Query(ge=1, description="Maximum number of search results to return.")]
+PostLimit = Annotated[int, Query(ge=1, le=100, description="Maximum raw Facebook posts to return; default 20, maximum 100.")]
+SearchText = Annotated[str, Query(min_length=1, description="Required event-name or event-description search text.")]
+OptionalSearchText = Annotated[str | None, Query(min_length=1, description="Optional game-name or raw post-text search text.")]
+PublishStart = Annotated[date | None, Query(description="Inclusive Facebook post publish date in YYYY-MM-DD format.")]
+PublishEnd = Annotated[date | None, Query(description="Inclusive Facebook post publish date in YYYY-MM-DD format.")]
+
+
+class V2ApiError(BaseModel):
+    """Standard error returned by validation and missing-resource failures."""
+
+    detail: str = Field(description="Human-readable failure reason.")
+
+
+DOCUMENTED_ERROR_RESPONSES = {
+    400: {"model": V2ApiError, "description": "Invalid filter combination or value."},
+    401: {"model": V2ApiError, "description": "Missing Event API key."},
+    403: {"model": V2ApiError, "description": "Invalid or revoked Event API key."},
+    404: {"model": V2ApiError, "description": "Requested game, event, or post was not found."},
+}
 
 
 class V2Meta(BaseModel):
@@ -357,8 +394,16 @@ def _event_summary(*, game: dict[str, Any], events: list[dict[str, Any]]) -> dic
 def create_v2_router(*, db_path: str | Path) -> APIRouter:
     router = APIRouter()
 
-    @router.get("/api/events/v2/health", response_model=V2HealthResponse)
-    @router.get("/api/v2/health", response_model=V2HealthResponse)
+    @router.get(
+        "/api/events/v2/health",
+        response_model=V2HealthResponse,
+        operation_id="event_v2_health",
+        tags=["Service metadata"],
+        summary="Check Event API availability",
+        description="Public health check listing the canonical Event v2 routes. It does not query warehouse data.",
+        openapi_extra=PORTAL_PUBLIC,
+    )
+    @router.get("/api/v2/health", response_model=V2HealthResponse, include_in_schema=False)
     def get_health() -> V2HealthResponse:
         endpoints = [
             "GET /api/events/v2/health",
@@ -380,9 +425,18 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             meta=_meta(scope={}, semantics="api_metadata", count=len(endpoints)),
         )
 
-    @router.get("/api/events/v2/games", response_model=V2GamesResponse)
-    @router.get("/api/v2/games", response_model=V2GamesResponse)
-    def get_games(q: Annotated[str | None, Query(min_length=1)] = None) -> V2GamesResponse:
+    @router.get(
+        "/api/events/v2/games",
+        response_model=V2GamesResponse,
+        operation_id="event_v2_list_games",
+        tags=["Games"],
+        summary="List tracked games",
+        description="Lists active tracked games. Use each returned unified_app_id in game-scoped event and Facebook-post routes.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/games", response_model=V2GamesResponse, include_in_schema=False)
+    def get_games(q: OptionalSearchText = None) -> V2GamesResponse:
         conn = open_connection(db_path)
         try:
             results = fetch_games(conn, query=q)
@@ -393,18 +447,27 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             meta=_meta(scope={"q": q}, semantics="registered_games", count=len(results)),
         )
 
-    @router.get("/api/events/v2/games/{unified_app_id}/events", response_model=V2EventsResponse)
-    @router.get("/api/v2/games/{unified_app_id}/events", response_model=V2EventsResponse)
+    @router.get(
+        "/api/events/v2/games/{unified_app_id}/events",
+        response_model=V2EventsResponse,
+        operation_id="event_v2_list_game_events",
+        tags=["Game events"],
+        summary="List a game's events by event month",
+        description="Returns unified events for one game. month filters use event month_bucket, not Facebook-post publish dates.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/games/{unified_app_id}/events", response_model=V2EventsResponse, include_in_schema=False)
     def get_game_events(
-        unified_app_id: str,
-        month: Annotated[list[str] | None, Query()] = None,
-        start_month: str | None = None,
-        end_month: str | None = None,
-        top: Annotated[int | None, Query(ge=1)] = None,
-        event_category: Annotated[list[str] | None, Query()] = None,
-        source_type: Annotated[list[SourceType] | None, Query()] = None,
-        min_social_score: Annotated[int | None, Query(ge=0)] = None,
-        has_fb_posts: bool | None = None,
+        unified_app_id: GameId,
+        month: MonthFilter = None,
+        start_month: StartMonth = None,
+        end_month: EndMonth = None,
+        top: ResultLimit = None,
+        event_category: EventCategoryFilter = None,
+        source_type: SourceTypeFilter = None,
+        min_social_score: MinimumSocialScore = None,
+        has_fb_posts: HasFacebookPosts = None,
     ) -> V2EventsResponse:
         month_buckets = _month_scope(month=month, start_month=start_month, end_month=end_month)
         conn = open_connection(db_path)
@@ -431,17 +494,26 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             ),
         )
 
-    @router.get("/api/events/v2/games/{unified_app_id}/events/summary", response_model=V2EventSummaryResponse)
-    @router.get("/api/v2/games/{unified_app_id}/events/summary", response_model=V2EventSummaryResponse)
+    @router.get(
+        "/api/events/v2/games/{unified_app_id}/events/summary",
+        response_model=V2EventSummaryResponse,
+        operation_id="event_v2_summarize_game_events",
+        tags=["Game events"],
+        summary="Summarize a game's events by event month",
+        description="Aggregates unified-event and linked-Facebook metrics. Month filters describe event month_bucket, not post publication dates.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/games/{unified_app_id}/events/summary", response_model=V2EventSummaryResponse, include_in_schema=False)
     def get_game_event_summary(
-        unified_app_id: str,
-        month: Annotated[list[str] | None, Query()] = None,
-        start_month: str | None = None,
-        end_month: str | None = None,
-        event_category: Annotated[list[str] | None, Query()] = None,
-        source_type: Annotated[list[SourceType] | None, Query()] = None,
-        min_social_score: Annotated[int | None, Query(ge=0)] = None,
-        has_fb_posts: bool | None = None,
+        unified_app_id: GameId,
+        month: MonthFilter = None,
+        start_month: StartMonth = None,
+        end_month: EndMonth = None,
+        event_category: EventCategoryFilter = None,
+        source_type: SourceTypeFilter = None,
+        min_social_score: MinimumSocialScore = None,
+        has_fb_posts: HasFacebookPosts = None,
     ) -> V2EventSummaryResponse:
         month_buckets = _month_scope(month=month, start_month=start_month, end_month=end_month)
         conn = open_connection(db_path)
@@ -468,15 +540,24 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             ),
         )
 
-    @router.get("/api/events/v2/games/{unified_app_id}/events/search", response_model=V2EventSearchResponse)
-    @router.get("/api/v2/games/{unified_app_id}/events/search", response_model=V2EventSearchResponse)
+    @router.get(
+        "/api/events/v2/games/{unified_app_id}/events/search",
+        response_model=V2EventSearchResponse,
+        operation_id="event_v2_search_game_events",
+        tags=["Game events"],
+        summary="Search a game's events",
+        description="Searches event names and descriptions within one game. Any month filter applies to event month_bucket, not Facebook-post publish dates.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/games/{unified_app_id}/events/search", response_model=V2EventSearchResponse, include_in_schema=False)
     def search_game_events(
-        unified_app_id: str,
-        q: Annotated[str, Query(min_length=1)],
-        month: Annotated[list[str] | None, Query()] = None,
-        start_month: str | None = None,
-        end_month: str | None = None,
-        top: Annotated[int, Query(ge=1)] = 10,
+        unified_app_id: GameId,
+        q: SearchText,
+        month: MonthFilter = None,
+        start_month: StartMonth = None,
+        end_month: EndMonth = None,
+        top: SearchLimit = 10,
     ) -> V2EventSearchResponse:
         month_buckets = _month_scope(month=month, start_month=start_month, end_month=end_month)
         start_date, end_date = _month_dates(month_buckets)
@@ -506,13 +587,22 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             ),
         )
 
-    @router.get("/api/events/v2/games/{unified_app_id}/events/coverage", response_model=V2EventCoverageResponse)
-    @router.get("/api/v2/games/{unified_app_id}/events/coverage", response_model=V2EventCoverageResponse)
+    @router.get(
+        "/api/events/v2/games/{unified_app_id}/events/coverage",
+        response_model=V2EventCoverageResponse,
+        operation_id="event_v2_get_game_event_coverage",
+        tags=["Game events"],
+        summary="Get a game's event coverage",
+        description="Reports available event month buckets and linked Facebook-post counts for one game. Month filters use event month_bucket.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/games/{unified_app_id}/events/coverage", response_model=V2EventCoverageResponse, include_in_schema=False)
     def get_game_event_coverage(
-        unified_app_id: str,
-        month: Annotated[list[str] | None, Query()] = None,
-        start_month: str | None = None,
-        end_month: str | None = None,
+        unified_app_id: GameId,
+        month: MonthFilter = None,
+        start_month: StartMonth = None,
+        end_month: EndMonth = None,
     ) -> V2EventCoverageResponse:
         month_buckets = _month_scope(month=month, start_month=start_month, end_month=end_month)
         conn = open_connection(db_path)
@@ -535,14 +625,23 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             ),
         )
 
-    @router.get("/api/events/v2/games/{unified_app_id}/posts", response_model=V2PostsResponse)
-    @router.get("/api/v2/games/{unified_app_id}/posts", response_model=V2PostsResponse)
+    @router.get(
+        "/api/events/v2/games/{unified_app_id}/posts",
+        response_model=V2PostsResponse,
+        operation_id="event_v2_list_game_posts",
+        tags=["Facebook posts"],
+        summary="List a game's raw Facebook posts",
+        description="Returns raw Facebook posts even when they are not linked to an event. publish_start and publish_end filter actual Facebook publish_time, not event month_bucket.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/games/{unified_app_id}/posts", response_model=V2PostsResponse, include_in_schema=False)
     def get_game_posts(
-        unified_app_id: str,
-        publish_start: date | None = None,
-        publish_end: date | None = None,
-        limit: Annotated[int, Query(ge=1, le=100)] = 20,
-        q: Annotated[str | None, Query(min_length=1)] = None,
+        unified_app_id: GameId,
+        publish_start: PublishStart = None,
+        publish_end: PublishEnd = None,
+        limit: PostLimit = 20,
+        q: OptionalSearchText = None,
     ) -> V2PostsResponse:
         publish_start, publish_end = _date_scope(publish_start=publish_start, publish_end=publish_end)
         conn = open_connection(db_path)
@@ -573,9 +672,18 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             ),
         )
 
-    @router.get("/api/events/v2/games/{unified_app_id}", response_model=V2GameDetailResponse)
-    @router.get("/api/v2/games/{unified_app_id}", response_model=V2GameDetailResponse)
-    def get_game(unified_app_id: str) -> V2GameDetailResponse:
+    @router.get(
+        "/api/events/v2/games/{unified_app_id}",
+        response_model=V2GameDetailResponse,
+        operation_id="event_v2_get_game",
+        tags=["Games"],
+        summary="Get a tracked game",
+        description="Returns the registered game identity, active state, and configured Facebook page IDs.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/games/{unified_app_id}", response_model=V2GameDetailResponse, include_in_schema=False)
+    def get_game(unified_app_id: GameId) -> V2GameDetailResponse:
         conn = open_connection(db_path)
         try:
             result = _game_or_404(conn, unified_app_id)
@@ -586,9 +694,18 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             meta=_meta(scope={"unified_app_id": unified_app_id}, semantics="registered_game_detail", count=1),
         )
 
-    @router.get("/api/events/v2/events/{unified_event_id}/post-stats", response_model=V2EventPostStatsResponse)
-    @router.get("/api/v2/events/{unified_event_id}/post-stats", response_model=V2EventPostStatsResponse)
-    def get_event_post_stats(unified_event_id: str) -> V2EventPostStatsResponse:
+    @router.get(
+        "/api/events/v2/events/{unified_event_id}/post-stats",
+        response_model=V2EventPostStatsResponse,
+        operation_id="event_v2_get_event_post_stats",
+        tags=["Events"],
+        summary="Get an event's Facebook-post metrics",
+        description="Returns aggregate metrics for Facebook posts linked to one unified event.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/events/{unified_event_id}/post-stats", response_model=V2EventPostStatsResponse, include_in_schema=False)
+    def get_event_post_stats(unified_event_id: EventId) -> V2EventPostStatsResponse:
         conn = open_connection(db_path)
         try:
             result = fetch_event_post_statistics(conn, unified_event_id=unified_event_id)
@@ -601,9 +718,18 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             meta=_meta(scope={"unified_event_id": unified_event_id}, semantics="event_linked_fb_post_metrics", count=1),
         )
 
-    @router.get("/api/events/v2/events/{unified_event_id}/posts", response_model=V2EventPostsResponse)
-    @router.get("/api/v2/events/{unified_event_id}/posts", response_model=V2EventPostsResponse)
-    def get_event_posts(unified_event_id: str) -> V2EventPostsResponse:
+    @router.get(
+        "/api/events/v2/events/{unified_event_id}/posts",
+        response_model=V2EventPostsResponse,
+        operation_id="event_v2_list_event_posts",
+        tags=["Events"],
+        summary="List Facebook posts linked to an event",
+        description="Returns only raw Facebook posts linked to this unified event, with normalized numeric social metrics.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/events/{unified_event_id}/posts", response_model=V2EventPostsResponse, include_in_schema=False)
+    def get_event_posts(unified_event_id: EventId) -> V2EventPostsResponse:
         conn = open_connection(db_path)
         try:
             result = fetch_event_posts_light(conn, unified_event_id=unified_event_id)
@@ -632,9 +758,18 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             meta=_meta(scope={"unified_event_id": unified_event_id}, semantics="event_linked_posts", count=len(result["posts"])),
         )
 
-    @router.get("/api/events/v2/events/{unified_event_id}", response_model=V2EventDetailResponse)
-    @router.get("/api/v2/events/{unified_event_id}", response_model=V2EventDetailResponse)
-    def get_event(unified_event_id: str) -> V2EventDetailResponse:
+    @router.get(
+        "/api/events/v2/events/{unified_event_id}",
+        response_model=V2EventDetailResponse,
+        operation_id="event_v2_get_event",
+        tags=["Events"],
+        summary="Get a unified event",
+        description="Returns one unified event with its event month_bucket, estimated dates, evidence counts, and Facebook metrics.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/events/{unified_event_id}", response_model=V2EventDetailResponse, include_in_schema=False)
+    def get_event(unified_event_id: EventId) -> V2EventDetailResponse:
         conn = open_connection(db_path)
         try:
             result = fetch_event_detail(conn, unified_event_id=unified_event_id)
@@ -647,9 +782,18 @@ def create_v2_router(*, db_path: str | Path) -> APIRouter:
             meta=_meta(scope={"unified_event_id": unified_event_id}, semantics="event_detail", count=1),
         )
 
-    @router.get("/api/events/v2/posts/{source_post_id}", response_model=V2PostDetailResponse)
-    @router.get("/api/v2/posts/{source_post_id}", response_model=V2PostDetailResponse)
-    def get_post(source_post_id: str) -> V2PostDetailResponse:
+    @router.get(
+        "/api/events/v2/posts/{source_post_id}",
+        response_model=V2PostDetailResponse,
+        operation_id="event_v2_get_post",
+        tags=["Facebook posts"],
+        summary="Get a raw Facebook post",
+        description="Returns one raw Facebook post by source ID, including actual publish_time, normalized metrics, and any linked events.",
+        responses=DOCUMENTED_ERROR_RESPONSES,
+        openapi_extra=PORTAL_AUTHENTICATED,
+    )
+    @router.get("/api/v2/posts/{source_post_id}", response_model=V2PostDetailResponse, include_in_schema=False)
+    def get_post(source_post_id: PostId) -> V2PostDetailResponse:
         conn = open_connection(db_path)
         try:
             result = fetch_post_detail_v2(conn, source_post_id=source_post_id)

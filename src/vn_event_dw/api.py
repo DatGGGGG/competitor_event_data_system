@@ -5,7 +5,8 @@ from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 
 from .api_auth import ApiKeyMiddleware
@@ -28,6 +29,54 @@ from .admin import admin_enabled_from_env, create_admin_router
 from .etl import open_connection
 
 SourceType = Literal["fb_post", "st_app_update_event", "st_version_event"]
+
+OPENAPI_DESCRIPTION = """
+Read-only game-event and Facebook-post data for Vietnam.
+
+Use the `/api/events/v2` routes as the canonical contract. Event endpoints use
+`month_bucket`, which groups an event by its estimated lifecycle month. Raw
+Facebook-post endpoints use the actual `publish_time`; do not infer a post's
+publication month from an event's `month_bucket`.
+
+Collection responses contain `results`; single-resource responses contain
+`result`. Every response includes `meta`, with the applied `scope`, the
+meaning of the time field in `semantics`, and the returned-item `count`.
+""".strip()
+
+
+def _install_openapi_contract(app: FastAPI) -> None:
+    """Expose a stable, secret-free OpenAPI contract for the Portal importer."""
+
+    def custom_openapi() -> dict[str, object]:
+        if app.openapi_schema:
+            return app.openapi_schema
+
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        info = schema.setdefault("info", {})
+        info["x-portal-source"] = "events"
+        info["x-portal-contract-version"] = 1
+        components = schema.setdefault("components", {})
+        security_schemes = components.setdefault("securitySchemes", {})
+        security_schemes["EventApiKey"] = {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": (
+                "Native Event service credential. Send a provisioned key in "
+                "`X-API-Key`. `Authorization: Bearer <key>` is also accepted "
+                "at runtime for compatibility. The Portal may apply its own "
+                "gateway credential before forwarding the request."
+            ),
+        }
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = custom_openapi
 
 
 class EventResponseItem(BaseModel):
@@ -262,11 +311,16 @@ def _resolve_db_path(db_path: str | Path | None) -> Path:
 
 def create_app(*, db_path: str | Path | None = None) -> FastAPI:
     resolved_db_path = _resolve_db_path(db_path)
-    app = FastAPI(title="VN Event DW API", version="0.1.0")
+    app = FastAPI(
+        title="VN Event DW API",
+        version="2.0.0",
+        description=OPENAPI_DESCRIPTION,
+    )
     app.add_middleware(ApiKeyMiddleware)
     app.include_router(create_v2_router(db_path=resolved_db_path))
     if admin_enabled_from_env():
         app.include_router(create_admin_router(db_path=resolved_db_path))
+    legacy_router = APIRouter(include_in_schema=False)
 
     def _lookup_params(
         unified_app_id: Annotated[list[str], Query(..., min_length=1)],
@@ -312,7 +366,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             )
         return time_range_start, time_range_end
 
-    @app.get("/api/games", response_model=GameLookupResponse)
+    @legacy_router.get("/api/games", response_model=GameLookupResponse)
     def get_games(
         q: Annotated[str | None, Query(min_length=1)] = None,
     ) -> GameLookupResponse:
@@ -323,7 +377,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             conn.close()
         return GameLookupResponse(results=results)
 
-    @app.get("/api/events", response_model=EventsResponse)
+    @legacy_router.get("/api/events", response_model=EventsResponse)
     def get_events(
         lookup: tuple[list[str], date, date] = Depends(_lookup_params),
         filters: dict[str, object] = Depends(_filters),
@@ -344,7 +398,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             conn.close()
         return EventsResponse(results=results)
 
-    @app.get("/api/events/compact", response_model=CompactEventsResponse)
+    @legacy_router.get("/api/events/compact", response_model=CompactEventsResponse)
     def get_events_compact(
         lookup: tuple[list[str], date, date] = Depends(_lookup_params),
         filters: dict[str, object] = Depends(_filters),
@@ -363,7 +417,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             conn.close()
         return CompactEventsResponse(results=results)
 
-    @app.get("/api/events/summary", response_model=EventSummaryResponse)
+    @legacy_router.get("/api/events/summary", response_model=EventSummaryResponse)
     def get_event_summary(
         lookup: tuple[list[str], date, date] = Depends(_lookup_params),
         filters: dict[str, object] = Depends(_filters),
@@ -382,7 +436,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             conn.close()
         return EventSummaryResponse(results=results)
 
-    @app.get("/api/events/coverage", response_model=EventCoverageResponse)
+    @legacy_router.get("/api/events/coverage", response_model=EventCoverageResponse)
     def get_event_coverage(
         unified_app_id: Annotated[list[str] | None, Query(min_length=1)] = None,
         date_scope: tuple[date | None, date | None] = Depends(_optional_date_scope),
@@ -402,7 +456,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             conn.close()
         return EventCoverageResponse(results=results)
 
-    @app.get("/api/events/search", response_model=EventSearchResponse)
+    @legacy_router.get("/api/events/search", response_model=EventSearchResponse)
     def get_event_search(
         q: Annotated[str, Query(min_length=1)],
         unified_app_id: Annotated[list[str] | None, Query(min_length=1)] = None,
@@ -426,7 +480,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             conn.close()
         return EventSearchResponse(results=results)
 
-    @app.get("/api/events/{unified_event_id}/post-stats", response_model=EventPostStatisticsResponse)
+    @legacy_router.get("/api/events/{unified_event_id}/post-stats", response_model=EventPostStatisticsResponse)
     def get_event_post_stats(unified_event_id: str) -> EventPostStatisticsResponse:
         conn = open_connection(resolved_db_path)
         try:
@@ -437,7 +491,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Unified event not found.")
         return EventPostStatisticsResponse(**result)
 
-    @app.get("/api/events/{unified_event_id}/top-posts", response_model=EventTopPostsResponse)
+    @legacy_router.get("/api/events/{unified_event_id}/top-posts", response_model=EventTopPostsResponse)
     def get_event_top_posts(
         unified_event_id: str,
         top: Annotated[int, Query(ge=1)] = 5,
@@ -451,7 +505,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Unified event not found.")
         return EventTopPostsResponse(**result)
 
-    @app.get("/api/events/{unified_event_id}/posts", response_model=EventPostsLightResponse)
+    @legacy_router.get("/api/events/{unified_event_id}/posts", response_model=EventPostsLightResponse)
     def get_event_posts(unified_event_id: str) -> EventPostsLightResponse:
         conn = open_connection(resolved_db_path)
         try:
@@ -462,7 +516,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Unified event not found.")
         return EventPostsLightResponse(**result)
 
-    @app.get("/api/events/{unified_event_id}", response_model=EventDetailResponse)
+    @legacy_router.get("/api/events/{unified_event_id}", response_model=EventDetailResponse)
     def get_event_detail(unified_event_id: str) -> EventDetailResponse:
         conn = open_connection(resolved_db_path)
         try:
@@ -473,7 +527,7 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Unified event not found.")
         return EventDetailResponse(**result)
 
-    @app.get("/api/posts/{source_post_id}", response_model=PostDetailResponse)
+    @legacy_router.get("/api/posts/{source_post_id}", response_model=PostDetailResponse)
     def get_post(source_post_id: str) -> PostDetailResponse:
         conn = open_connection(resolved_db_path)
         try:
@@ -484,4 +538,6 @@ def create_app(*, db_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Post not found.")
         return PostDetailResponse(**result)
 
+    app.include_router(legacy_router)
+    _install_openapi_contract(app)
     return app

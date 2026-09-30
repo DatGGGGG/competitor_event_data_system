@@ -23,3 +23,4 @@ local_secrets/*
 .local_vm/secrets/
 node_modules/
 handoff/*.rar
+.local_vm/secrets/
